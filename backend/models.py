@@ -111,6 +111,7 @@ class Issue(Base):
     id = Column(Integer, primary_key=True)
     issue_no = Column(String(50), unique=True, nullable=False)
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
+    to_location_id = Column(Integer, ForeignKey("locations.id"))  # destination, only for trade_code '01'
     reason_type = Column(String(20), nullable=False)  # 'trade_code' | 'trade_description'
     trade_code = Column(String(2), nullable=False)
     remark = Column(Text)
@@ -119,7 +120,8 @@ class Issue(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     items = relationship("IssueItem", back_populates="issue", cascade="all, delete-orphan")
-    location = relationship("Location")
+    location = relationship("Location", foreign_keys=[location_id])
+    to_location = relationship("Location", foreign_keys=[to_location_id])
 
 
 class IssueItem(Base):

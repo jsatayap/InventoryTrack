@@ -185,6 +185,7 @@ class IssueItemOut(BaseModel):
 class IssueCreate(BaseModel):
     issue_no: str
     location_id: int
+    to_location_id: int | None = None  # required when trade_code == '01' (transfer)
     reason_type: str  # 'trade_code' | 'trade_description'
     trade_code: str   # '01' transfer, '55' adjust, '99' wasted
     remark: str | None = None
@@ -196,6 +197,8 @@ class IssueOut(BaseModel):
     issue_no: str
     location_id: int
     location_name: str | None = None
+    to_location_id: int | None = None
+    to_location_name: str | None = None
     reason_type: str
     trade_code: str
     remark: str | None = None

@@ -8,9 +8,9 @@ router = APIRouter(prefix="/issues", tags=["issues"])
 
 VALID_ISS_TRADE_CODES = {"01", "55", "99"}  # transfer, adjust, wasted
 
-# maps a trade code to the resulting status on the physical unit
-UNIT_STATUS_BY_TRADE_CODE = {
-    "01": "transferred",
+# For non-transfer codes, the unit leaves inventory entirely and gets a terminal status.
+# '01' (transfer) is handled separately below since the unit moves rather than terminates.
+TERMINAL_STATUS_BY_TRADE_CODE = {
     "55": "issued",
     "99": "wasted",
 }
@@ -22,6 +22,8 @@ def _to_issue_out(issue: models.Issue) -> schemas.IssueOut:
         issue_no=issue.issue_no,
         location_id=issue.location_id,
         location_name=issue.location.name if issue.location else None,
+        to_location_id=issue.to_location_id,
+        to_location_name=issue.to_location.name if issue.to_location else None,
         reason_type=issue.reason_type,
         trade_code=issue.trade_code,
         remark=issue.remark,
@@ -41,6 +43,15 @@ def _to_issue_out(issue: models.Issue) -> schemas.IssueOut:
     )
 
 
+def _issue_query(db: Session):
+    return db.query(models.Issue).options(
+        joinedload(models.Issue.items).joinedload(models.IssueItem.product),
+        joinedload(models.Issue.items).joinedload(models.IssueItem.product_unit),
+        joinedload(models.Issue.location),
+        joinedload(models.Issue.to_location),
+    )
+
+
 @router.get("", response_model=list[schemas.IssueOut])
 def list_issues(
     location_id: int | None = Query(None),
@@ -48,11 +59,7 @@ def list_issues(
     db: Session = Depends(get_db),
     current_user=Depends(auth.get_current_user),
 ):
-    query = db.query(models.Issue).options(
-        joinedload(models.Issue.items).joinedload(models.IssueItem.product),
-        joinedload(models.Issue.items).joinedload(models.IssueItem.product_unit),
-        joinedload(models.Issue.location),
-    )
+    query = _issue_query(db)
     if location_id:
         query = query.filter(models.Issue.location_id == location_id)
     if trade_code:
@@ -64,16 +71,7 @@ def list_issues(
 
 @router.get("/{issue_id}", response_model=schemas.IssueOut)
 def get_issue(issue_id: int, db: Session = Depends(get_db), current_user=Depends(auth.get_current_user)):
-    issue = (
-        db.query(models.Issue)
-        .options(
-            joinedload(models.Issue.items).joinedload(models.IssueItem.product),
-            joinedload(models.Issue.items).joinedload(models.IssueItem.product_unit),
-            joinedload(models.Issue.location),
-        )
-        .filter(models.Issue.id == issue_id)
-        .first()
-    )
+    issue = _issue_query(db).filter(models.Issue.id == issue_id).first()
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
     return _to_issue_out(issue)
@@ -90,6 +88,19 @@ def create_issue(
     if payload.reason_type not in ("trade_code", "trade_description"):
         raise HTTPException(status_code=400, detail="reason_type must be 'trade_code' or 'trade_description'")
 
+    is_transfer = payload.trade_code == "01"
+
+    if is_transfer:
+        if not payload.to_location_id:
+            raise HTTPException(status_code=400, detail="to_location_id is required for a transfer (trade_code '01')")
+        if payload.to_location_id == payload.location_id:
+            raise HTTPException(status_code=400, detail="Destination location must be different from the source location")
+        to_location = db.query(models.Location).filter(models.Location.id == payload.to_location_id).first()
+        if not to_location:
+            raise HTTPException(status_code=404, detail="Destination location not found")
+    elif payload.to_location_id:
+        raise HTTPException(status_code=400, detail="to_location_id is only used with trade_code '01' (transfer)")
+
     existing = db.query(models.Issue).filter(models.Issue.issue_no == payload.issue_no).first()
     if existing:
         raise HTTPException(status_code=409, detail=f"Issue number '{payload.issue_no}' already exists")
@@ -102,7 +113,7 @@ def create_issue(
         raise HTTPException(status_code=400, detail="Issue must have at least one item")
 
     # ---- Pass 1: validate every line before touching any data ----
-    resolved = []  # (product, unit_or_none, quantity)
+    resolved = []  # (product, unit_or_balance, quantity)
     for line in payload.items:
         product = db.query(models.Product).filter(models.Product.id == line.product_id).first()
         if not product:
@@ -156,6 +167,7 @@ def create_issue(
     issue = models.Issue(
         issue_no=payload.issue_no,
         location_id=payload.location_id,
+        to_location_id=payload.to_location_id if is_transfer else None,
         reason_type=payload.reason_type,
         trade_code=payload.trade_code,
         remark=payload.remark,
@@ -164,12 +176,9 @@ def create_issue(
     db.add(issue)
     db.flush()  # get issue.id
 
-    new_status = UNIT_STATUS_BY_TRADE_CODE[payload.trade_code]
-
     for product, unit_or_balance, qty in resolved:
         if product.is_serialized:
             unit = unit_or_balance
-            unit.status = new_status
             db.add(
                 models.IssueItem(
                     issue_id=issue.id,
@@ -192,6 +201,27 @@ def create_issue(
                     created_by=current_user.id,
                 )
             )
+
+            if is_transfer:
+                # The unit moves: stays in_stock, but now at the destination location.
+                unit.current_location_id = payload.to_location_id
+                unit.status = "in_stock"
+                db.add(
+                    models.StockTransaction(
+                        trade_type="RCV",
+                        trade_code="01",
+                        product_id=product.id,
+                        location_id=payload.to_location_id,
+                        serial_number=unit.serial_number,
+                        quantity=1,
+                        ref_type="issue",
+                        ref_id=issue.id,
+                        created_by=current_user.id,
+                    )
+                )
+            else:
+                unit.status = TERMINAL_STATUS_BY_TRADE_CODE[payload.trade_code]
+
         else:
             balance = unit_or_balance
             balance.quantity -= qty
@@ -218,16 +248,38 @@ def create_issue(
                 )
             )
 
+            if is_transfer:
+                # Add the same quantity to the destination location's balance.
+                dest_balance = (
+                    db.query(models.StockBalance)
+                    .filter(
+                        models.StockBalance.product_id == product.id,
+                        models.StockBalance.location_id == payload.to_location_id,
+                    )
+                    .first()
+                )
+                if not dest_balance:
+                    dest_balance = models.StockBalance(
+                        product_id=product.id, location_id=payload.to_location_id, quantity=0
+                    )
+                    db.add(dest_balance)
+                    db.flush()
+                dest_balance.quantity += qty
+                db.add(
+                    models.StockTransaction(
+                        trade_type="RCV",
+                        trade_code="01",
+                        product_id=product.id,
+                        location_id=payload.to_location_id,
+                        serial_number=None,
+                        quantity=qty,
+                        ref_type="issue",
+                        ref_id=issue.id,
+                        created_by=current_user.id,
+                    )
+                )
+
     db.commit()
 
-    issue = (
-        db.query(models.Issue)
-        .options(
-            joinedload(models.Issue.items).joinedload(models.IssueItem.product),
-            joinedload(models.Issue.items).joinedload(models.IssueItem.product_unit),
-            joinedload(models.Issue.location),
-        )
-        .filter(models.Issue.id == issue.id)
-        .first()
-    )
+    issue = _issue_query(db).filter(models.Issue.id == issue.id).first()
     return _to_issue_out(issue)
