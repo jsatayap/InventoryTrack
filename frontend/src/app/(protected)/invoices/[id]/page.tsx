@@ -1,10 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, FormEvent } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
-import { Invoice } from "@/lib/types";
+import { Invoice, Location } from "@/lib/types";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Field, FieldLabel, FieldGroup } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Pencil } from "lucide-react";
 
 const STATUS_STYLES: Record<string, string> = {
   pending: "text-neutral-500",
@@ -13,19 +31,71 @@ const STATUS_STYLES: Record<string, string> = {
   cancelled: "text-red-700",
 };
 
+const STATUS_OPTIONS = ["pending", "receiving", "completed", "cancelled"];
+
 export default function InvoiceDetailPage() {
   const params = useParams<{ id: string }>();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [locations, setLocations] = useState<Location[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [editInvoiceNo, setEditInvoiceNo] = useState("");
+  const [editLocationId, setEditLocationId] = useState<number | "">("");
+  const [editStatus, setEditStatus] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
   useEffect(() => {
-    api
+    api.get<Location[]>("/locations").then(setLocations).catch(() => {});
+    fetchInvoice();
+  }, [params.id]);
+
+  function fetchInvoice() {
+    setIsLoading(true);
+    setError(null);
+    return api
       .get<Invoice>(`/invoices/${params.id}`)
       .then(setInvoice)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load invoice."))
       .finally(() => setIsLoading(false));
-  }, [params.id]);
+  }
+
+  function openEditDialog() {
+    if (!invoice) return;
+    setEditInvoiceNo(invoice.invoice_no);
+    setEditLocationId(invoice.location_id ?? "");
+    setEditStatus(invoice.status);
+    setFormError(null);
+    setShowEditForm(true);
+  }
+
+  async function handleEditInvoice(e: FormEvent) {
+    e.preventDefault();
+    if (!invoice) return;
+    setFormError(null);
+
+    if (!editLocationId) {
+      setFormError("Select a location.");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await api.put(`/invoices/${invoice.id}`, {
+        invoice_no: editInvoiceNo,
+        location_id: editLocationId,
+        status: editStatus,
+      });
+      setShowEditForm(false);
+      fetchInvoice();
+    } catch (err) {
+      setFormError(err instanceof ApiError ? err.message : "Could not update invoice.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
 
   if (isLoading) {
     return <p className="text-sm text-neutral-400">Loading…</p>;
@@ -49,7 +119,82 @@ export default function InvoiceDetailPage() {
 
       <div className="flex items-start justify-between mt-4 mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-neutral-900 font-mono">{invoice.invoice_no}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold text-neutral-900 font-mono">{invoice.invoice_no}</h1>
+            <Dialog open={showEditForm} onOpenChange={setShowEditForm}>
+              <DialogTrigger
+                render={
+                  <Button variant="ghost" size="icon" aria-label="Edit invoice" onClick={openEditDialog}>
+                    <Pencil className="size-4" />
+                  </Button>
+                }
+              />
+              <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
+                <DialogHeader>
+                  <DialogTitle>Edit Invoice</DialogTitle>
+                </DialogHeader>
+
+                <form onSubmit={handleEditInvoice} className="overflow-y-auto pr-1 -mr-1">
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel htmlFor="edit-invoice-no">Invoice No.</FieldLabel>
+                      <Input
+                        id="edit-invoice-no"
+                        required
+                        value={editInvoiceNo}
+                        onChange={(e) => setEditInvoiceNo(e.target.value)}
+                        placeholder="INV-0002"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="edit-invoice-location">Receiving Location</FieldLabel>
+                      <select
+                        id="edit-invoice-location"
+                        required
+                        value={editLocationId}
+                        onChange={(e) =>
+                          setEditLocationId(e.target.value ? Number(e.target.value) : "")
+                        }
+                        className="input"
+                      >
+                        <option value="">Select…</option>
+                        {locations.map((loc) => (
+                          <option key={loc.id} value={loc.id}>
+                            {loc.name}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="edit-invoice-status">Status</FieldLabel>
+                      <Select value={editStatus} onValueChange={setEditStatus}>
+                        <SelectTrigger id="edit-invoice-status">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {STATUS_OPTIONS.map((status) => (
+                            <SelectItem key={status} value={status} className="capitalize">
+                              {status}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+
+                    <div className="flex items-center gap-3">
+                      <Button type="submit" disabled={isSaving}>
+                        {isSaving ? "Saving…" : "Save changes"}
+                      </Button>
+                      <Button type="button" variant="ghost" onClick={() => setShowEditForm(false)}>
+                        Cancel
+                      </Button>
+                      {formError && <p className="text-sm text-red-700">{formError}</p>}
+                    </div>
+                  </FieldGroup>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
           <p className="text-sm text-neutral-500 mt-1">
             {invoice.location_name} · {invoice.invoice_date}
           </p>

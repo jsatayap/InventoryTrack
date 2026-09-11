@@ -124,3 +124,58 @@ def create_invoice(
         .first()
     )
     return _to_invoice_out(invoice)
+
+
+VALID_STATUSES = {"pending", "receiving", "completed", "cancelled"}
+
+
+@router.put("/{invoice_id}", response_model=schemas.InvoiceOut)
+def update_invoice(
+    invoice_id: int,
+    payload: schemas.InvoiceUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(auth.get_current_user),
+):
+    invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    if payload.invoice_no is not None and payload.invoice_no != invoice.invoice_no:
+        clash = (
+            db.query(models.Invoice)
+            .filter(models.Invoice.invoice_no == payload.invoice_no, models.Invoice.id != invoice_id)
+            .first()
+        )
+        if clash:
+            raise HTTPException(
+                status_code=409, detail=f"Invoice number '{payload.invoice_no}' already exists"
+            )
+        invoice.invoice_no = payload.invoice_no
+
+    if payload.location_id is not None:
+        location = db.query(models.Location).filter(models.Location.id == payload.location_id).first()
+        if not location:
+            raise HTTPException(status_code=404, detail="Location not found")
+        invoice.location_id = payload.location_id
+
+    if payload.status is not None:
+        if payload.status not in VALID_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status '{payload.status}'. Must be one of {sorted(VALID_STATUSES)}",
+            )
+        invoice.status = payload.status
+
+    db.commit()
+    db.refresh(invoice)
+
+    invoice = (
+        db.query(models.Invoice)
+        .options(
+            joinedload(models.Invoice.items).joinedload(models.InvoiceItem.product),
+            joinedload(models.Invoice.location),
+        )
+        .filter(models.Invoice.id == invoice.id)
+        .first()
+    )
+    return _to_invoice_out(invoice)

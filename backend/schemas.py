@@ -133,6 +133,10 @@ class InvoiceCreate(BaseModel):
     invoice_date: str | None = None  # ISO date string, defaults to today in DB
     items: list[InvoiceItemCreate]
 
+class InvoiceUpdate(BaseModel):
+    invoice_no: str | None = None
+    location_id: int | None = None
+    status: str | None = None
 
 class InvoiceOut(BaseModel):
     id: int

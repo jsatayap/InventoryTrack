@@ -2,8 +2,39 @@
 
 import { useEffect, useState, FormEvent } from "react";
 import Link from "next/link";
-import { api, buildQuery, ApiError } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { Invoice, Location, Product, NewInvoiceItem } from "@/lib/types";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Field, FieldLabel, FieldGroup } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationPrevious,
+  PaginationNext,
+} from "@/components/ui/pagination";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ChevronDown } from "lucide-react";
 
 const STATUS_STYLES: Record<string, string> = {
   pending: "text-neutral-500",
@@ -11,6 +42,8 @@ const STATUS_STYLES: Record<string, string> = {
   completed: "text-green-700",
   cancelled: "text-red-700",
 };
+
+const STATUS_OPTIONS = ["pending", "receiving", "completed", "cancelled"];
 
 const emptyLine: NewInvoiceItem = { product_id: "", quantity: 1, unit_price: 0 };
 
@@ -21,8 +54,8 @@ export default function InvoicesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [filterLocation, setFilterLocation] = useState<number | "">("");
-  const [filterStatus, setFilterStatus] = useState<string>("");
+  const [selectedLocationIds, setSelectedLocationIds] = useState<number[]>([]);
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [invoiceNo, setInvoiceNo] = useState("");
@@ -30,6 +63,9 @@ export default function InvoicesPage() {
   const [lines, setLines] = useState<NewInvoiceItem[]>([{ ...emptyLine }]);
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     api.get<Location[]>("/locations").then(setLocations).catch(() => {});
@@ -41,14 +77,41 @@ export default function InvoicesPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const query = buildQuery({ location_id: filterLocation || undefined, status: filterStatus || undefined });
-      const data = await api.get<Invoice[]>(`/invoices${query}`);
+      const data = await api.get<Invoice[]>("/invoices");
       setInvoices(data);
+      setCurrentPage(1);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not load invoices.");
     } finally {
       setIsLoading(false);
     }
+  }
+
+  function toggleLocationFilter(id: number) {
+    setSelectedLocationIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+    setCurrentPage(1);
+  }
+
+  function toggleStatusFilter(status: string) {
+    setSelectedStatuses((prev) =>
+      prev.includes(status) ? prev.filter((x) => x !== status) : [...prev, status]
+    );
+    setCurrentPage(1);
+  }
+
+  function clearFilters() {
+    setSelectedLocationIds([]);
+    setSelectedStatuses([]);
+    setCurrentPage(1);
+  }
+
+  function resetAddForm() {
+    setInvoiceNo("");
+    setInvoiceLocation("");
+    setLines([{ ...emptyLine }]);
+    setFormError(null);
   }
 
   function updateLine(index: number, patch: Partial<NewInvoiceItem>) {
@@ -91,9 +154,7 @@ export default function InvoicesPage() {
         location_id: invoiceLocation,
         items: lines,
       });
-      setInvoiceNo("");
-      setInvoiceLocation("");
-      setLines([{ ...emptyLine }]);
+      resetAddForm();
       setShowAddForm(false);
       fetchInvoices();
     } catch (err) {
@@ -106,164 +167,216 @@ export default function InvoicesPage() {
   const lineTotal = (l: NewInvoiceItem) => l.quantity * l.unit_price;
   const grandTotal = lines.reduce((sum, l) => sum + lineTotal(l), 0);
 
+  const selectedLocationNames = locations
+    .filter((l) => selectedLocationIds.includes(l.id))
+    .map((l) => l.name);
+
+  const filteredInvoices = invoices.filter((inv) => {
+    const locationMatch =
+      selectedLocationNames.length === 0 || selectedLocationNames.includes(inv.location_name);
+    const statusMatch = selectedStatuses.length === 0 || selectedStatuses.includes(inv.status);
+    return locationMatch && statusMatch;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filteredInvoices.length / pageSize));
+  const pageStart = (currentPage - 1) * pageSize;
+  const pagedInvoices = filteredInvoices.slice(pageStart, pageStart + pageSize);
+
+  function handlePageSizeChange(value: string) {
+    setPageSize(Number(value));
+    setCurrentPage(1);
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-neutral-900">Invoices</h1>
-        <button
-          onClick={() => setShowAddForm((v) => !v)}
-          className="bg-[#1E3A5F] text-white text-sm font-medium px-4 py-2 hover:bg-[#16304d] transition-colors"
+        <Dialog
+          open={showAddForm}
+          onOpenChange={(open) => {
+            setShowAddForm(open);
+            if (!open) resetAddForm();
+          }}
         >
-          {showAddForm ? "Cancel" : "New Invoice"}
-        </button>
+          <DialogTrigger
+            render={
+              <Button className="bg-[#1E3A5F] text-white hover:bg-[#16304d]">
+                New Invoice
+              </Button>
+            }
+          />
+          <DialogContent className="sm:max-w-3xl max-h-[85vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle>New Invoice</DialogTitle>
+            </DialogHeader>
+
+            <form onSubmit={handleCreate} className="overflow-y-auto pr-1 -mr-1">
+              <FieldGroup>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Field>
+                    <FieldLabel htmlFor="invoice-no">Invoice No.</FieldLabel>
+                    <Input
+                      id="invoice-no"
+                      required
+                      value={invoiceNo}
+                      onChange={(e) => setInvoiceNo(e.target.value)}
+                      placeholder="INV-0002"
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="invoice-location">Receiving Location</FieldLabel>
+                    <select
+                      id="invoice-location"
+                      required
+                      value={invoiceLocation}
+                      onChange={(e) => setInvoiceLocation(e.target.value ? Number(e.target.value) : "")}
+                      className="input"
+                    >
+                      <option value="">Select…</option>
+                      {locations.map((loc) => (
+                        <option key={loc.id} value={loc.id}>
+                          {loc.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+
+                <div className="border border-neutral-200">
+                  <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-neutral-50 text-xs text-neutral-500 font-medium">
+                    <div className="col-span-5">Product</div>
+                    <div className="col-span-2">Qty</div>
+                    <div className="col-span-2">Unit price</div>
+                    <div className="col-span-2 text-right">Line total</div>
+                    <div className="col-span-1"></div>
+                  </div>
+                  {lines.map((line, i) => (
+                    <div key={i} className="grid grid-cols-12 gap-2 px-3 py-2 border-t border-neutral-200 items-center">
+                      <select
+                        className="input col-span-5"
+                        value={line.product_id || ""}
+                        onChange={(e) => handleProductPick(i, e.target.value)}
+                      >
+                        <option value="">Select product…</option>
+                        {products.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} {p.storage_size != null ? `(${p.storage_size} GB)` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <Input
+                        type="number"
+                        min={1}
+                        className="col-span-2"
+                        value={line.quantity}
+                        onChange={(e) => updateLine(i, { quantity: Number(e.target.value) })}
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        className="col-span-2"
+                        value={line.unit_price}
+                        onChange={(e) => updateLine(i, { unit_price: Number(e.target.value) })}
+                      />
+                      <div className="col-span-2 text-right text-sm">{lineTotal(line).toLocaleString()}</div>
+                      <div className="col-span-1 text-right">
+                        {lines.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-600 hover:text-red-700"
+                            onClick={() => removeLine(i)}
+                          >
+                            Remove
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <Button type="button" variant="ghost" onClick={addLine}>
+                    + Add line
+                  </Button>
+                  <div className="text-sm font-medium">
+                    Total: {grandTotal.toLocaleString()}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <Button type="submit" disabled={isSaving}>
+                    {isSaving ? "Saving…" : "Create invoice"}
+                  </Button>
+                  {formError && <p className="text-sm text-red-700">{formError}</p>}
+                </div>
+              </FieldGroup>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
 
-      {showAddForm && (
-        <form onSubmit={handleCreate} className="border border-neutral-300 bg-white p-4 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-            <label className="block">
-              <span className="block text-xs text-neutral-500 mb-1">Invoice No.</span>
-              <input
-                required
-                value={invoiceNo}
-                onChange={(e) => setInvoiceNo(e.target.value)}
-                className="input"
-                placeholder="INV-0002"
-              />
-            </label>
-            <label className="block">
-              <span className="block text-xs text-neutral-500 mb-1">Receiving Location</span>
-              <select
-                required
-                value={invoiceLocation}
-                onChange={(e) => setInvoiceLocation(e.target.value ? Number(e.target.value) : "")}
-                className="input"
-              >
-                <option value="">Select…</option>
-                {locations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    {loc.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="border border-neutral-200">
-            <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-neutral-50 text-xs text-neutral-500 font-medium">
-              <div className="col-span-5">Product</div>
-              <div className="col-span-2">Qty</div>
-              <div className="col-span-2">Unit price</div>
-              <div className="col-span-2 text-right">Line total</div>
-              <div className="col-span-1"></div>
-            </div>
-            {lines.map((line, i) => (
-              <div key={i} className="grid grid-cols-12 gap-2 px-3 py-2 border-t border-neutral-200 items-center">
-                <select
-                  className="input col-span-5"
-                  value={line.product_id || ""}
-                  onChange={(e) => handleProductPick(i, e.target.value)}
-                >
-                  <option value="">Select product…</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} {p.storage_size != null ? `(${p.storage_size} GB)` : ""}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  min={1}
-                  className="input col-span-2"
-                  value={line.quantity}
-                  onChange={(e) => updateLine(i, { quantity: Number(e.target.value) })}
-                />
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  className="input col-span-2"
-                  value={line.unit_price}
-                  onChange={(e) => updateLine(i, { unit_price: Number(e.target.value) })}
-                />
-                <div className="col-span-2 text-right text-sm">{lineTotal(line).toLocaleString()}</div>
-                <div className="col-span-1 text-right">
-                  {lines.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeLine(i)}
-                      className="text-sm text-red-600 hover:underline"
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex items-center justify-between mt-3">
-            <button
-              type="button"
-              onClick={addLine}
-              className="text-sm text-[#1E3A5F] hover:underline"
-            >
-              + Add line
-            </button>
-            <div className="text-sm font-medium">
-              Total: {grandTotal.toLocaleString()}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 mt-4">
-            <button
-              type="submit"
-              disabled={isSaving}
-              className="bg-[#1E3A5F] text-white text-sm font-medium px-4 py-2 hover:bg-[#16304d] disabled:opacity-50 transition-colors"
-            >
-              {isSaving ? "Saving…" : "Create invoice"}
-            </button>
-            {formError && <p className="text-sm text-red-700">{formError}</p>}
-          </div>
-        </form>
-      )}
-
-      <div className="border border-neutral-300 bg-white p-4 mb-4 flex flex-wrap gap-3 items-end">
-        <label className="block">
-          <span className="block text-xs text-neutral-500 mb-1">Location</span>
-          <select
-            value={filterLocation}
-            onChange={(e) => setFilterLocation(e.target.value ? Number(e.target.value) : "")}
-            className="input"
-          >
-            <option value="">All locations</option>
+      <div className="border border-neutral-300 bg-white p-4 mb-4 flex flex-wrap gap-3 items-center">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="outline" className="justify-between min-w-[160px]">
+                <span>
+                  Location
+                  {selectedLocationIds.length > 0 ? ` (${selectedLocationIds.length})` : ""}
+                </span>
+                <ChevronDown className="size-4 opacity-50" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="start">
             {locations.map((loc) => (
-              <option key={loc.id} value={loc.id}>
+              <DropdownMenuCheckboxItem
+                key={loc.id}
+                checked={selectedLocationIds.includes(loc.id)}
+                onCheckedChange={() => toggleLocationFilter(loc.id)}
+                onSelect={(e) => e.preventDefault()}
+              >
                 {loc.name}
-              </option>
+              </DropdownMenuCheckboxItem>
             ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="block text-xs text-neutral-500 mb-1">Status</span>
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="input"
-          >
-            <option value="">All statuses</option>
-            <option value="pending">Pending</option>
-            <option value="receiving">Receiving</option>
-            <option value="completed">Completed</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-        </label>
-        <button
-          onClick={fetchInvoices}
-          className="bg-neutral-900 text-white text-sm font-medium px-4 py-2 hover:bg-neutral-700 transition-colors"
-        >
-          Filter
-        </button>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="outline" className="justify-between min-w-[160px]">
+                <span>
+                  Status
+                  {selectedStatuses.length > 0 ? ` (${selectedStatuses.length})` : ""}
+                </span>
+                <ChevronDown className="size-4 opacity-50" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="start">
+            {STATUS_OPTIONS.map((status) => (
+              <DropdownMenuCheckboxItem
+                key={status}
+                checked={selectedStatuses.includes(status)}
+                onCheckedChange={() => toggleStatusFilter(status)}
+                onSelect={(e) => e.preventDefault()}
+                className="capitalize"
+              >
+                {status}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {(selectedLocationIds.length > 0 || selectedStatuses.length > 0) && (
+          <Button variant="ghost" onClick={clearFilters}>
+            Clear filters
+          </Button>
+        )}
       </div>
 
       {error && (
@@ -290,14 +403,14 @@ export default function InvoicesPage() {
                   Loading…
                 </td>
               </tr>
-            ) : invoices.length === 0 ? (
+            ) : pagedInvoices.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-3 py-6 text-center text-neutral-400">
                   No invoices found.
                 </td>
               </tr>
             ) : (
-              invoices.map((inv) => (
+              pagedInvoices.map((inv) => (
                 <tr key={inv.id} className="border-b border-neutral-200 last:border-0 hover:bg-neutral-50">
                   <td className="px-3 py-2">
                     <Link href={`/invoices/${inv.id}`} className="text-[#1E3A5F] hover:underline font-mono text-xs">
@@ -315,6 +428,58 @@ export default function InvoicesPage() {
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="flex items-center justify-between mt-4">
+        <Field orientation="horizontal" className="items-center gap-2 w-auto">
+          <FieldLabel htmlFor="page-size" className="font-normal text-neutral-500">
+            Rows per page
+          </FieldLabel>
+          <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
+            <SelectTrigger id="page-size" className="w-[80px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="5">5</SelectItem>
+              <SelectItem value="10">10</SelectItem>
+              <SelectItem value="20">20</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+
+        <div className="flex items-center gap-4">
+          <p className="text-sm text-neutral-500">
+            Page {currentPage} of {totalPages}
+          </p>
+          <Pagination className="mx-0 w-auto">
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setCurrentPage((p) => Math.max(1, p - 1));
+                  }}
+                  aria-disabled={currentPage === 1}
+                  className={currentPage === 1 ? "pointer-events-none opacity-50" : undefined}
+                />
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationNext
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setCurrentPage((p) => Math.min(totalPages, p + 1));
+                  }}
+                  aria-disabled={currentPage === totalPages}
+                  className={
+                    currentPage === totalPages ? "pointer-events-none opacity-50" : undefined
+                  }
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        </div>
       </div>
     </div>
   );
