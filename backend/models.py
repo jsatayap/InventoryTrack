@@ -2,10 +2,11 @@ from sqlalchemy import (
     Column, Integer, String, Boolean, Numeric, Text, Date, DateTime,
     ForeignKey, func
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from database import Base
+from uuid7 import uuid7
 
 
 class User(Base):
@@ -37,18 +38,21 @@ class Location(Base):
 class Product(Base):
     __tablename__ = "products"
 
-    id = Column(Integer, primary_key=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid7)
     sku = Column(String(50), unique=True, nullable=False)
     name = Column(String(150), nullable=False)
     series = Column(String(100))
-    storage_size = Column(String(20))
+    storage_size = Column(Integer)  # GB, e.g. 256 — lets us filter/sort by range
     color = Column(String(50))
-    ram = Column(String(20))
+    ram = Column(Integer)  # GB, e.g. 8 — lets us filter/sort by range
     price = Column(Numeric(12, 2), nullable=False, default=0)
     is_serialized = Column(Boolean, nullable=False, default=True)
     extra_specs = Column(JSONB)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(Integer, ForeignKey("users.id"))
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_by = Column(Integer, ForeignKey("users.id"))
 
 
 class Invoice(Base):
@@ -71,7 +75,7 @@ class InvoiceItem(Base):
 
     id = Column(Integer, primary_key=True)
     invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False)
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
     unit_price = Column(Numeric(12, 2), nullable=False)
     received_qty = Column(Integer, nullable=False, default=0)
@@ -84,7 +88,7 @@ class ProductUnit(Base):
     __tablename__ = "product_units"
 
     id = Column(Integer, primary_key=True)
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
     serial_number = Column(String(100), unique=True, nullable=False)
     status = Column(String(20), nullable=False, default="in_stock")
     current_location_id = Column(Integer, ForeignKey("locations.id"))
@@ -100,7 +104,7 @@ class StockBalance(Base):
     __tablename__ = "stock_balances"
 
     id = Column(Integer, primary_key=True)
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
     quantity = Column(Integer, nullable=False, default=0)
 
@@ -129,7 +133,7 @@ class IssueItem(Base):
 
     id = Column(Integer, primary_key=True)
     issue_id = Column(Integer, ForeignKey("issues.id", ondelete="CASCADE"), nullable=False)
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
     product_unit_id = Column(Integer, ForeignKey("product_units.id"))
     quantity = Column(Integer, nullable=False, default=1)
     unit_price = Column(Numeric(12, 2))
@@ -145,7 +149,7 @@ class StockTransaction(Base):
     id = Column(Integer, primary_key=True)
     trade_type = Column(String(3), nullable=False)  # 'RCV' | 'ISS'
     trade_code = Column(String(2), nullable=False)
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
     serial_number = Column(String(100))
     quantity = Column(Integer, nullable=False, default=1)

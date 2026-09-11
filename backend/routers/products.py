@@ -1,5 +1,7 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -15,9 +17,13 @@ def search_products(
     location_id: int | None = Query(None, description="Only show products currently in stock at this location"),
     name: str | None = Query(None, description="Partial match on product name"),
     series: str | None = Query(None, description="Partial match on series, e.g. 'iPhone 15'"),
-    storage_size: str | None = Query(None, description="Exact match, e.g. '256GB'"),
+    storage_size: int | None = Query(None, description="Exact match, in GB, e.g. 256"),
+    min_storage: int | None = Query(None, description="Minimum storage, in GB"),
+    max_storage: int | None = Query(None, description="Maximum storage, in GB"),
     color: str | None = Query(None, description="Partial match on color"),
-    ram: str | None = Query(None, description="Exact match, e.g. '8GB'"),
+    ram: int | None = Query(None, description="Exact match, in GB, e.g. 8"),
+    min_ram: int | None = Query(None, description="Minimum RAM, in GB"),
+    max_ram: int | None = Query(None, description="Maximum RAM, in GB"),
     min_price: float | None = Query(None),
     max_price: float | None = Query(None),
     include_inactive: bool = Query(False),
@@ -32,12 +38,20 @@ def search_products(
         query = query.filter(models.Product.name.ilike(f"%{name}%"))
     if series:
         query = query.filter(models.Product.series.ilike(f"%{series}%"))
-    if storage_size:
+    if storage_size is not None:
         query = query.filter(models.Product.storage_size == storage_size)
+    if min_storage is not None:
+        query = query.filter(models.Product.storage_size >= min_storage)
+    if max_storage is not None:
+        query = query.filter(models.Product.storage_size <= max_storage)
     if color:
         query = query.filter(models.Product.color.ilike(f"%{color}%"))
-    if ram:
+    if ram is not None:
         query = query.filter(models.Product.ram == ram)
+    if min_ram is not None:
+        query = query.filter(models.Product.ram >= min_ram)
+    if max_ram is not None:
+        query = query.filter(models.Product.ram <= max_ram)
     if min_price is not None:
         query = query.filter(models.Product.price >= min_price)
     if max_price is not None:
@@ -87,7 +101,7 @@ def search_products(
 # ---------------- CRUD ----------------
 
 @router.get("/{product_id}", response_model=schemas.ProductOut)
-def get_product(product_id: int, db: Session = Depends(get_db), current_user=Depends(auth.get_current_user)):
+def get_product(product_id: uuid.UUID, db: Session = Depends(get_db), current_user=Depends(auth.get_current_user)):
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
@@ -104,7 +118,7 @@ def create_product(
     if existing:
         raise HTTPException(status_code=409, detail=f"SKU '{payload.sku}' already exists")
 
-    product = models.Product(**payload.model_dump())
+    product = models.Product(**payload.model_dump(), created_by=current_user.id)
     db.add(product)
     db.commit()
     db.refresh(product)
@@ -113,7 +127,7 @@ def create_product(
 
 @router.put("/{product_id}", response_model=schemas.ProductOut)
 def update_product(
-    product_id: int,
+    product_id: uuid.UUID,
     payload: schemas.ProductUpdate,
     db: Session = Depends(get_db),
     current_user=Depends(auth.get_current_user),
@@ -125,6 +139,8 @@ def update_product(
     updates = payload.model_dump(exclude_unset=True)
     for field, value in updates.items():
         setattr(product, field, value)
+    product.updated_by = current_user.id
+    product.updated_at = func.now()
 
     db.commit()
     db.refresh(product)
@@ -133,7 +149,7 @@ def update_product(
 
 @router.delete("/{product_id}", status_code=204)
 def deactivate_product(
-    product_id: int,
+    product_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user=Depends(auth.get_current_user),
 ):
@@ -143,5 +159,7 @@ def deactivate_product(
         raise HTTPException(status_code=404, detail="Product not found")
 
     product.is_active = False
+    product.updated_by = current_user.id
+    product.updated_at = func.now()
     db.commit()
     return None

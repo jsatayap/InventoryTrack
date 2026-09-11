@@ -12,7 +12,7 @@ const STATUS_STYLES: Record<string, string> = {
   cancelled: "text-red-700",
 };
 
-const emptyLine: NewInvoiceItem = { product_id: 0, quantity: 1, unit_price: 0 };
+const emptyLine: NewInvoiceItem = { product_id: "", quantity: 1, unit_price: 0 };
 
 export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -63,7 +63,7 @@ export default function InvoicesPage() {
     setLines((prev) => prev.filter((_, i) => i !== index));
   }
 
-  function handleProductPick(index: number, productId: number) {
+  function handleProductPick(index: number, productId: string) {
     const product = products.find((p) => p.id === productId);
     updateLine(index, {
       product_id: productId,
@@ -162,12 +162,12 @@ export default function InvoicesPage() {
                 <select
                   className="input col-span-5"
                   value={line.product_id || ""}
-                  onChange={(e) => handleProductPick(i, Number(e.target.value))}
+                  onChange={(e) => handleProductPick(i, e.target.value)}
                 >
                   <option value="">Select product…</option>
                   {products.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name} {p.storage_size ? `(${p.storage_size})` : ""}
+                      {p.name} {p.storage_size != null ? `(${p.storage_size} GB)` : ""}
                     </option>
                   ))}
                 </select>

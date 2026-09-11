@@ -19,8 +19,8 @@ export default function ReceivePage() {
   const invoiceId = params.id;
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
-  const [productsById, setProductsById] = useState<Record<number, Product>>({});
-  const [lineState, setLineState] = useState<Record<number, LineState>>({});
+  const [productsById, setProductsById] = useState<Record<string, Product>>({});
+  const [lineState, setLineState] = useState<Record<string, LineState>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -54,11 +54,11 @@ export default function ReceivePage() {
     }
   }
 
-  function patchLine(productId: number, patch: Partial<LineState>) {
+  function patchLine(productId: string, patch: Partial<LineState>) {
     setLineState((prev) => ({ ...prev, [productId]: { ...prev[productId], ...patch } }));
   }
 
-  function applyResult(productId: number, result: ReceiveResult) {
+  function applyResult(productId: string, result: ReceiveResult) {
     setInvoice((prev) => {
       if (!prev) return prev;
       return {
@@ -71,7 +71,7 @@ export default function ReceivePage() {
     });
   }
 
-  async function handleScanSerial(e: FormEvent, productId: number) {
+  async function handleScanSerial(e: FormEvent, productId: string) {
     e.preventDefault();
     const serial = lineState[productId]?.serialInput.trim();
     if (!serial) return;
@@ -92,7 +92,7 @@ export default function ReceivePage() {
     }
   }
 
-  async function handleAddQuantity(productId: number) {
+  async function handleAddQuantity(productId: string) {
     const qty = lineState[productId]?.qtyInput ?? 0;
     if (qty <= 0) return;
 

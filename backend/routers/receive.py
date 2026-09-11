@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -16,7 +18,7 @@ def _get_open_invoice(db: Session, invoice_id: int) -> models.Invoice:
     return invoice
 
 
-def _get_invoice_item(db: Session, invoice_id: int, product_id: int) -> models.InvoiceItem:
+def _get_invoice_item(db: Session, invoice_id: int, product_id: uuid.UUID) -> models.InvoiceItem:
     item = (
         db.query(models.InvoiceItem)
         .filter(models.InvoiceItem.invoice_id == invoice_id, models.InvoiceItem.product_id == product_id)

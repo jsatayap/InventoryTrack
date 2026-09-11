@@ -1,15 +1,19 @@
 export interface Product {
-  id: number;
+  id: string;
   sku: string;
   name: string;
   series: string | null;
-  storage_size: string | null;
+  storage_size: number | null; // GB
   color: string | null;
-  ram: string | null;
+  ram: number | null; // GB
   price: number;
   is_serialized: boolean;
   extra_specs: Record<string, unknown> | null;
   is_active: boolean;
+  created_at: string;
+  created_by: number | null;
+  updated_at: string | null;
+  updated_by: number | null;
 }
 
 export interface ProductWithStock extends Product {
@@ -30,9 +34,13 @@ export interface ProductFilters {
   location_id?: number;
   name?: string;
   series?: string;
-  storage_size?: string;
+  storage_size?: number;
+  min_storage?: number;
+  max_storage?: number;
   color?: string;
-  ram?: string;
+  ram?: number;
+  min_ram?: number;
+  max_ram?: number;
   min_price?: number;
   max_price?: number;
 }
@@ -41,16 +49,16 @@ export interface NewProduct {
   sku: string;
   name: string;
   series?: string;
-  storage_size?: string;
+  storage_size?: number;
   color?: string;
-  ram?: string;
+  ram?: number;
   price: number;
   is_serialized: boolean;
 }
 
 export interface InvoiceItem {
   id: number;
-  product_id: number;
+  product_id: string;
   product_name: string | null;
   quantity: number;
   unit_price: number;
@@ -69,7 +77,7 @@ export interface Invoice {
 }
 
 export interface NewInvoiceItem {
-  product_id: number;
+  product_id: string;
   quantity: number;
   unit_price: number;
 }
@@ -83,7 +91,7 @@ export interface NewInvoice {
 export interface ReceiveResult {
   invoice_id: number;
   invoice_status: string;
-  product_id: number;
+  product_id: string;
   item_received_qty: number;
   item_quantity: number;
   message: string;
@@ -91,7 +99,7 @@ export interface ReceiveResult {
 
 export interface IssueItemOut {
   id: number;
-  product_id: number;
+  product_id: string;
   product_name: string | null;
   serial_number: string | null;
   quantity: number;
@@ -114,7 +122,7 @@ export interface Issue {
 }
 
 export interface NewIssueItem {
-  product_id: number;
+  product_id: string;
   serial_number?: string;
   quantity?: number;
 }
@@ -130,11 +138,11 @@ export interface NewIssue {
 }
 
 export interface CurrentStockRow {
-  product_id: number;
+  product_id: string;
   sku: string;
   name: string;
   series: string | null;
-  storage_size: string | null;
+  storage_size: number | null;
   color: string | null;
   is_serialized: boolean;
   location_id: number;
@@ -146,9 +154,9 @@ export interface StockTrackingRow {
   location_name: string;
   product_name: string;
   series: string | null;
-  storage_size: string | null;
+  storage_size: number | null;
   color: string | null;
-  ram: string | null;
+  ram: number | null;
   extra_specs: Record<string, unknown> | null;
   control_serial: string | null;
   non_control_amount: number | null;

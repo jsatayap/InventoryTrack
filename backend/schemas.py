@@ -1,3 +1,6 @@
+import uuid
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -33,9 +36,9 @@ class ProductBase(BaseModel):
     sku: str
     name: str
     series: str | None = None
-    storage_size: str | None = None
+    storage_size: int | None = None  # GB
     color: str | None = None
-    ram: str | None = None
+    ram: int | None = None  # GB
     price: float
     is_serialized: bool = True
     extra_specs: dict | None = None
@@ -50,9 +53,9 @@ class ProductUpdate(BaseModel):
     sku: str | None = None
     name: str | None = None
     series: str | None = None
-    storage_size: str | None = None
+    storage_size: int | None = None
     color: str | None = None
-    ram: str | None = None
+    ram: int | None = None
     price: float | None = None
     is_serialized: bool | None = None
     extra_specs: dict | None = None
@@ -60,7 +63,11 @@ class ProductUpdate(BaseModel):
 
 
 class ProductOut(ProductBase):
-    id: int
+    id: uuid.UUID
+    created_at: datetime
+    created_by: int | None = None
+    updated_at: datetime | None = None
+    updated_by: int | None = None
 
     class Config:
         from_attributes = True
@@ -103,14 +110,14 @@ class LocationOut(LocationBase):
 # ---------------- Invoices ----------------
 
 class InvoiceItemCreate(BaseModel):
-    product_id: int
+    product_id: uuid.UUID
     quantity: int
     unit_price: float
 
 
 class InvoiceItemOut(BaseModel):
     id: int
-    product_id: int
+    product_id: uuid.UUID
     product_name: str | None = None
     quantity: int
     unit_price: float
@@ -144,19 +151,19 @@ class InvoiceOut(BaseModel):
 # ---------------- Receive ----------------
 
 class ReceiveSerialRequest(BaseModel):
-    product_id: int
+    product_id: uuid.UUID
     serial_number: str
 
 
 class ReceiveQuantityRequest(BaseModel):
-    product_id: int
+    product_id: uuid.UUID
     quantity: int
 
 
 class ReceiveResultOut(BaseModel):
     invoice_id: int
     invoice_status: str
-    product_id: int
+    product_id: uuid.UUID
     item_received_qty: int
     item_quantity: int
     message: str
@@ -165,14 +172,14 @@ class ReceiveResultOut(BaseModel):
 # ---------------- Issues (สินค้าออก) ----------------
 
 class IssueItemCreate(BaseModel):
-    product_id: int
+    product_id: uuid.UUID
     serial_number: str | None = None  # required for serialized products
     quantity: int | None = None       # required for non-serialized products
 
 
 class IssueItemOut(BaseModel):
     id: int
-    product_id: int
+    product_id: uuid.UUID
     product_name: str | None = None
     serial_number: str | None = None
     quantity: int
@@ -213,11 +220,11 @@ class IssueOut(BaseModel):
 # ---------------- Stock (read-only views) ----------------
 
 class CurrentStockOut(BaseModel):
-    product_id: int
+    product_id: uuid.UUID
     sku: str
     name: str
     series: str | None = None
-    storage_size: str | None = None
+    storage_size: int | None = None
     color: str | None = None
     is_serialized: bool
     location_id: int
@@ -229,9 +236,9 @@ class StockTrackingOut(BaseModel):
     location_name: str
     product_name: str
     series: str | None = None
-    storage_size: str | None = None
+    storage_size: int | None = None
     color: str | None = None
-    ram: str | None = None
+    ram: int | None = None
     extra_specs: dict | None = None
     control_serial: str | None = None
     non_control_amount: int | None = None

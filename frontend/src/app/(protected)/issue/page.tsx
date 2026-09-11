@@ -11,12 +11,12 @@ const TRADE_CODES = [
 ];
 
 interface LineDraft {
-  product_id: number;
+  product_id: string;
   serialInput: string;
   quantityInput: number;
 }
 
-const emptyLine: LineDraft = { product_id: 0, serialInput: "", quantityInput: 1 };
+const emptyLine: LineDraft = { product_id: "", serialInput: "", quantityInput: 1 };
 
 export default function IssuePage() {
   const [locations, setLocations] = useState<Location[]>([]);
@@ -59,7 +59,7 @@ export default function IssuePage() {
     }
   }
 
-  function productById(id: number) {
+  function productById(id: string) {
     return products.find((p) => p.id === id);
   }
 
@@ -254,12 +254,12 @@ export default function IssuePage() {
                 <select
                   className="input col-span-5"
                   value={line.product_id || ""}
-                  onChange={(e) => updateLine(i, { product_id: Number(e.target.value) })}
+                  onChange={(e) => updateLine(i, { product_id: e.target.value })}
                 >
                   <option value="">Select product…</option>
                   {products.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name} {p.storage_size ? `(${p.storage_size})` : ""}
+                      {p.name} {p.storage_size != null ? `(${p.storage_size} GB)` : ""}
                     </option>
                   ))}
                 </select>
