@@ -166,6 +166,52 @@ def update_invoice(
             )
         invoice.status = payload.status
 
+    if payload.items is not None:
+        if not payload.items:
+            raise HTTPException(status_code=400, detail="Invoice must have at least one item")
+
+        existing_items = {item.id: item for item in invoice.items}
+        incoming_ids = {line.id for line in payload.items if line.id is not None}
+
+        # Remove lines the client dropped -- but never one that already has received stock
+        for item_id, item in existing_items.items():
+            if item_id not in incoming_ids:
+                if item.received_qty > 0:
+                    label = item.product.name if item.product else item.product_id
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Cannot remove '{label}' — it already has received quantity.",
+                    )
+                db.delete(item)
+
+        for line in payload.items:
+            product = db.query(models.Product).filter(models.Product.id == line.product_id).first()
+            if not product:
+                raise HTTPException(status_code=404, detail=f"Product id {line.product_id} not found")
+
+            if line.id is not None and line.id in existing_items:
+                item = existing_items[line.id]
+                if line.quantity < item.received_qty:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Quantity for '{product.name}' can't be less than the "
+                            f"already received amount ({item.received_qty})."
+                        ),
+                    )
+                item.product_id = line.product_id
+                item.quantity = line.quantity
+                item.unit_price = line.unit_price
+            else:
+                db.add(
+                    models.InvoiceItem(
+                        invoice_id=invoice.id,
+                        product_id=line.product_id,
+                        quantity=line.quantity,
+                        unit_price=line.unit_price,
+                    )
+                )
+
     db.commit()
     db.refresh(invoice)
 
