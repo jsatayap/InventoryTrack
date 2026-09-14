@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
-import models, schemas, auth
+import models, schemas, auth, status_codes
 
 router = APIRouter(prefix="/receive", tags=["receive"])
 
@@ -70,7 +70,7 @@ def receive_by_serial(
     unit = models.ProductUnit(
         product_id=payload.product_id,
         serial_number=payload.serial_number,
-        status="in_stock",
+        status=status_codes.PRODUCT_UNIT_IN_STOCK,
         current_location_id=invoice.location_id,
         invoice_item_id=item.id,
     )

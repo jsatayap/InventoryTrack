@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useMemo, useState, FormEvent } from "react";
 import { api, buildQuery, ApiError } from "@/lib/api";
 import { ProductWithStock, Location, ProductFilters, NewProduct } from "@/lib/types";
 import {
@@ -43,6 +43,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Command,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Search, X } from "lucide-react";
+
 
 const emptyNewProduct: NewProduct = {
   sku: "",
@@ -79,6 +95,52 @@ export default function ProductsPage() {
   const [pageSize, setPageSize] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
 
+  const [filterOpen, setFilterOpen] = useState(false);
+
+  const selectedLocationIds = filters.location_ids ?? [];
+
+  function toggleLocation(id: number) {
+    setFilters((prev) => {
+      const current = prev.location_ids ?? [];
+      const next = current.includes(id)
+        ? current.filter((locId) => locId !== id)
+        : [...current, id];
+      return { ...prev, location_ids: next.length ? next : undefined };
+    });
+  }
+
+  const activeFilterCount = [
+    selectedLocationIds.length > 0,
+    !!filters.name,
+    !!filters.series,
+    filters.min_storage != null,
+    filters.max_storage != null,
+    !!filters.color,
+    filters.min_ram != null,
+    filters.max_ram != null,
+    filters.min_price != null,
+    filters.max_price != null,
+  ].filter(Boolean).length;
+
+  const querySuggestions = useMemo(() => {
+    const q = (filters.name ?? "").trim().toLowerCase();
+    if (!q) return [];
+    const seen = new Set<string>();
+    const suggestions: { label: string; field: "name" | "series" }[] = [];
+    for (const p of products) {
+      if (suggestions.length >= 3) break;
+      if (p.name.toLowerCase().includes(q) && !seen.has(`name:${p.name}`)) {
+        seen.add(`name:${p.name}`);
+        suggestions.push({ label: p.name, field: "name" });
+      }
+      if (p.series && p.series.toLowerCase().includes(q) && !seen.has(`series:${p.series}`)) {
+        seen.add(`series:${p.series}`);
+        suggestions.push({ label: p.series, field: "series" });
+      }
+    }
+    return suggestions;
+  }, [products, filters.name]);
+
   useEffect(() => {
     api.get<Location[]>("/locations").then(setLocations).catch(() => {});
     fetchProducts({});
@@ -89,7 +151,7 @@ export default function ProductsPage() {
     setError(null);
     try {
       const query = buildQuery({
-        location_id: f.location_id,
+        location_ids: f.location_ids?.length ? f.location_ids.join(",") : undefined,
         name: f.name,
         series: f.series,
         storage_size: f.storage_size,
@@ -110,11 +172,6 @@ export default function ProductsPage() {
     } finally {
       setIsLoading(false);
     }
-  }
-
-  function handleSearch(e: FormEvent) {
-    e.preventDefault();
-    fetchProducts(filters);
   }
 
   function handleClear() {
@@ -322,137 +379,218 @@ export default function ProductsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <form
-        onSubmit={handleSearch}
-        className="border border-neutral-300 bg-white p-4 mb-4 grid grid-cols-2 md:grid-cols-4 gap-3"
-      >
-        <Field>
-          <FieldLabel htmlFor="filter-location">Location</FieldLabel>
-          <select
-            id="filter-location"
-            value={filters.location_id ?? ""}
-            onChange={(e) =>
-              setFilters({
-                ...filters,
-                location_id: e.target.value ? Number(e.target.value) : undefined,
-              })
-            }
-            className="input"
-          >
-            <option value="">All locations</option>
-            {locations.map((loc) => (
-              <option key={loc.id} value={loc.id}>
-                {loc.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="filter-name">Name</FieldLabel>
-          <Input
-            id="filter-name"
-            value={filters.name ?? ""}
-            onChange={(e) => setFilters({ ...filters, name: e.target.value })}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="filter-series">Series</FieldLabel>
-          <Input
-            id="filter-series"
-            value={filters.series ?? ""}
-            onChange={(e) => setFilters({ ...filters, series: e.target.value })}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="filter-min-storage">Min storage (GB)</FieldLabel>
-          <Input
-            id="filter-min-storage"
-            type="number"
-            min={0}
-            value={filters.min_storage ?? ""}
-            onChange={(e) =>
-              setFilters({ ...filters, min_storage: e.target.value ? Number(e.target.value) : undefined })
+      <div className="border border-neutral-300 bg-white p-3 mb-4">
+        <Popover open={filterOpen} onOpenChange={setFilterOpen}>
+          <PopoverTrigger
+            render={
+              <button
+                type="button"
+                className="flex w-full max-w-md items-center gap-2 border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-500 hover:bg-neutral-50"
+              >
+                <Search className="size-4" />
+                <span className="flex-1 text-left">
+                  {filters.name ? filters.name : "Search products…"}
+                </span>
+                {activeFilterCount > 0 && (
+                  <span className="rounded-full bg-[#1E3A5F] px-2 py-0.5 text-xs font-medium text-white">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
             }
           />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="filter-max-storage">Max storage (GB)</FieldLabel>
-          <Input
-            id="filter-max-storage"
-            type="number"
-            min={0}
-            value={filters.max_storage ?? ""}
-            onChange={(e) =>
-              setFilters({ ...filters, max_storage: e.target.value ? Number(e.target.value) : undefined })
-            }
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="filter-color">Color</FieldLabel>
-          <Input
-            id="filter-color"
-            value={filters.color ?? ""}
-            onChange={(e) => setFilters({ ...filters, color: e.target.value })}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="filter-min-ram">Min RAM (GB)</FieldLabel>
-          <Input
-            id="filter-min-ram"
-            type="number"
-            min={0}
-            value={filters.min_ram ?? ""}
-            onChange={(e) =>
-              setFilters({ ...filters, min_ram: e.target.value ? Number(e.target.value) : undefined })
-            }
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="filter-max-ram">Max RAM (GB)</FieldLabel>
-          <Input
-            id="filter-max-ram"
-            type="number"
-            min={0}
-            value={filters.max_ram ?? ""}
-            onChange={(e) =>
-              setFilters({ ...filters, max_ram: e.target.value ? Number(e.target.value) : undefined })
-            }
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="filter-min-price">Min price</FieldLabel>
-          <Input
-            id="filter-min-price"
-            type="number"
-            min={0}
-            value={filters.min_price ?? ""}
-            onChange={(e) =>
-              setFilters({ ...filters, min_price: e.target.value ? Number(e.target.value) : undefined })
-            }
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="filter-max-price">Max price</FieldLabel>
-          <Input
-            id="filter-max-price"
-            type="number"
-            min={0}
-            value={filters.max_price ?? ""}
-            onChange={(e) =>
-              setFilters({ ...filters, max_price: e.target.value ? Number(e.target.value) : undefined })
-            }
-          />
-        </Field>
+          <PopoverContent className="w-[380px] p-0" align="start">
+            <Command shouldFilter={false}>
+              <CommandInput
+                placeholder="Search by product name…"
+                value={filters.name ?? ""}
+                onValueChange={(v) => setFilters({ ...filters, name: v })}
+              />
+              <CommandList className="max-h-[360px]">
+                {querySuggestions.length > 0 && (
+                  <>
+                    <CommandGroup heading="Suggestions">
+                      {querySuggestions.map((s) => (
+                        <CommandItem
+                          key={`${s.field}-${s.label}`}
+                          value={`suggestion-${s.field}-${s.label}`}
+                          onSelect={() => {
+                            const next =
+                              s.field === "name"
+                                ? { ...filters, name: s.label }
+                                : { ...filters, series: s.label };
+                            setFilters(next);
+                            fetchProducts(next);
+                            setFilterOpen(false);
+                          }}
+                          className="gap-2"
+                        >
+                          <Search className="size-3.5 text-neutral-400" />
+                          <span className="flex-1">{s.label}</span>
+                          <span className="text-xs text-neutral-400">
+                            {s.field === "name" ? "Product" : "Series"}
+                          </span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                    <CommandSeparator />
+                  </>
+                )}
 
-        <div className="col-span-2 md:col-span-4 flex gap-3">
-          <Button type="submit" variant="secondary">
-            Search
-          </Button>
-          <Button type="button" variant="ghost" onClick={handleClear}>
-            Clear filters
-          </Button>
-        </div>
-      </form>
+                <CommandGroup heading="Location">
+                  {locations.length === 0 ? (
+                    <div className="px-2 py-1.5 text-sm text-neutral-400">No locations found.</div>
+                  ) : (
+                    locations.map((loc) => (
+                      <CommandItem
+                        key={loc.id}
+                        value={`location-${loc.id}`}
+                        onSelect={() => toggleLocation(loc.id)}
+                        className="gap-2"
+                      >
+                        <Checkbox
+                          checked={selectedLocationIds.includes(loc.id)}
+                          onCheckedChange={() => toggleLocation(loc.id)}
+                        />
+                        {loc.name}
+                      </CommandItem>
+                    ))
+                  )}
+                </CommandGroup>
+
+                <CommandSeparator />
+
+                <CommandGroup heading="Series">
+                  <div className="px-2 py-1.5">
+                    <Input
+                      placeholder="e.g. iPhone 15"
+                      value={filters.series ?? ""}
+                      onChange={(e) => setFilters({ ...filters, series: e.target.value })}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    />
+                  </div>
+                </CommandGroup>
+
+                <CommandSeparator />
+
+                <CommandGroup heading="Specs">
+                  <div className="px-2 py-1.5 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        placeholder="Min storage (GB)"
+                        value={filters.min_storage ?? ""}
+                        onChange={(e) =>
+                          setFilters({
+                            ...filters,
+                            min_storage: e.target.value ? Number(e.target.value) : undefined,
+                          })
+                        }
+                        onKeyDown={(e) => e.stopPropagation()}
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        placeholder="Max storage (GB)"
+                        value={filters.max_storage ?? ""}
+                        onChange={(e) =>
+                          setFilters({
+                            ...filters,
+                            max_storage: e.target.value ? Number(e.target.value) : undefined,
+                          })
+                        }
+                        onKeyDown={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                    <Input
+                      placeholder="Color"
+                      value={filters.color ?? ""}
+                      onChange={(e) => setFilters({ ...filters, color: e.target.value })}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    />
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        placeholder="Min RAM (GB)"
+                        value={filters.min_ram ?? ""}
+                        onChange={(e) =>
+                          setFilters({ ...filters, min_ram: e.target.value ? Number(e.target.value) : undefined })
+                        }
+                        onKeyDown={(e) => e.stopPropagation()}
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        placeholder="Max RAM (GB)"
+                        value={filters.max_ram ?? ""}
+                        onChange={(e) =>
+                          setFilters({ ...filters, max_ram: e.target.value ? Number(e.target.value) : undefined })
+                        }
+                        onKeyDown={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        placeholder="Min price"
+                        value={filters.min_price ?? ""}
+                        onChange={(e) =>
+                          setFilters({
+                            ...filters,
+                            min_price: e.target.value ? Number(e.target.value) : undefined,
+                          })
+                        }
+                        onKeyDown={(e) => e.stopPropagation()}
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        placeholder="Max price"
+                        value={filters.max_price ?? ""}
+                        onChange={(e) =>
+                          setFilters({
+                            ...filters,
+                            max_price: e.target.value ? Number(e.target.value) : undefined,
+                          })
+                        }
+                        onKeyDown={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                  </div>
+                </CommandGroup>
+              </CommandList>
+
+              <div className="flex items-center justify-between gap-2 border-t border-neutral-200 p-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    handleClear();
+                    setFilterOpen(false);
+                  }}
+                >
+                  <X className="size-4" />
+                  Clear filters
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    fetchProducts(filters);
+                    setFilterOpen(false);
+                  }}
+                >
+                  Search
+                </Button>
+              </div>
+            </Command>
+          </PopoverContent>
+        </Popover>
+      </div>
 
       {error && (
         <p className="text-sm text-red-700 bg-red-50 border border-red-200 px-3 py-2 mb-4">
@@ -472,7 +610,9 @@ export default function ProductsPage() {
               <th className="px-3 py-2 font-medium">RAM</th>
               <th className="px-3 py-2 font-medium text-right">Price</th>
               <th className="px-3 py-2 font-medium">Tracking</th>
-              {filters.location_id && <th className="px-3 py-2 font-medium text-right">Qty</th>}
+              {selectedLocationIds.length === 1 && (
+                <th className="px-3 py-2 font-medium text-right">Qty</th>
+              )}
               <th className="px-3 py-2 font-medium text-right">Actions</th>
             </tr>
           </thead>
@@ -502,7 +642,7 @@ export default function ProductsPage() {
                   <td className="px-3 py-2 text-neutral-500">
                     {p.is_serialized ? "Control serial" : "Non-control"}
                   </td>
-                  {filters.location_id && (
+                  {selectedLocationIds.length === 1 && (
                     <td className="px-3 py-2 text-right">{p.quantity}</td>
                   )}
                   <td className="px-3 py-2">

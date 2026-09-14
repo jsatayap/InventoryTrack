@@ -31,7 +31,7 @@ export interface Location {
 }
 
 export interface ProductFilters {
-  location_id?: number;
+  location_ids?: number[];
   name?: string;
   series?: string;
   storage_size?: number;

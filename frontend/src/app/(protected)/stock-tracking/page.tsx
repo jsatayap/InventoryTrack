@@ -3,6 +3,22 @@
 import { useEffect, useState, FormEvent } from "react";
 import { api, buildQuery, ApiError } from "@/lib/api";
 import { Location, StockTrackingRow } from "@/lib/types";
+import { Field, FieldLabel } from "@/components/ui/field";
+
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationPrevious,
+  PaginationNext,
+} from "@/components/ui/pagination";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const STATUS_STYLES: Record<string, string> = {
   in_stock: "text-green-700",
@@ -21,6 +37,9 @@ export default function StockTrackingPage() {
   const [productName, setProductName] = useState("");
   const [status, setStatus] = useState("");
 
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
+
   useEffect(() => {
     api.get<Location[]>("/locations").then(setLocations).catch(() => {});
     fetchTracking();
@@ -38,6 +57,7 @@ export default function StockTrackingPage() {
       });
       const data = await api.get<StockTrackingRow[]>(`/stock/tracking${query}`);
       setRows(data);
+      setCurrentPage(1);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not load stock tracking.");
     } finally {
@@ -50,6 +70,15 @@ export default function StockTrackingPage() {
     fetchTracking();
   }
 
+  
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const pageStart = (currentPage - 1) * pageSize;
+  const pagedRows = rows.slice(pageStart, pageStart + pageSize);
+
+  function handlePageSizeChange(value: string) {
+    setPageSize(Number(value));
+    setCurrentPage(1);
+  }
   return (
     <div>
       <h1 className="text-xl font-semibold text-neutral-900 mb-6">Stock Tracking</h1>
@@ -120,14 +149,14 @@ export default function StockTrackingPage() {
                   Loading…
                 </td>
               </tr>
-            ) : rows.length === 0 ? (
+            ) : pagedRows.length === 0 ? (
               <tr>
                 <td colSpan={8} className="px-3 py-6 text-center text-neutral-400">
                   No records found.
                 </td>
               </tr>
             ) : (
-              rows.map((r, i) => (
+              pagedRows.map((r, i) => (
                 <tr key={i} className="border-b border-neutral-200 last:border-0">
                   <td className="px-3 py-2 text-neutral-600">{r.location_name}</td>
                   <td className="px-3 py-2">{r.product_name}</td>
@@ -146,6 +175,59 @@ export default function StockTrackingPage() {
             )}
           </tbody>
         </table>
+      </div>
+
+      
+      <div className="flex items-center justify-between mt-4">
+        <Field orientation="horizontal" className="items-center gap-2 w-auto">
+          <FieldLabel htmlFor="page-size" className="font-normal text-neutral-500">
+            Rows per page
+          </FieldLabel>
+          <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
+            <SelectTrigger id="page-size" className="w-[80px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="5">5</SelectItem>
+              <SelectItem value="10">10</SelectItem>
+              <SelectItem value="20">20</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+
+        <div className="flex items-center gap-4">
+          <p className="text-sm text-neutral-500">
+            Page {currentPage} of {totalPages}
+          </p>
+          <Pagination className="mx-0 w-auto">
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setCurrentPage((p) => Math.max(1, p - 1));
+                  }}
+                  aria-disabled={currentPage === 1}
+                  className={currentPage === 1 ? "pointer-events-none opacity-50" : undefined}
+                />
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationNext
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setCurrentPage((p) => Math.min(totalPages, p + 1));
+                  }}
+                  aria-disabled={currentPage === totalPages}
+                  className={
+                    currentPage === totalPages ? "pointer-events-none opacity-50" : undefined
+                  }
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        </div>
       </div>
     </div>
   );

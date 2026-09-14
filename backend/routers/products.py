@@ -14,7 +14,9 @@ router = APIRouter(prefix="/products", tags=["products"])
 
 @router.get("", response_model=list[schemas.ProductStockOut])
 def search_products(
-    location_id: int | None = Query(None, description="Only show products currently in stock at this location"),
+    location_ids: str | None = Query(
+        None, description="Comma-separated location ids, e.g. '1,3,5'. Only show products currently in stock at these locations"
+    ),
     name: str | None = Query(None, description="Partial match on product name"),
     series: str | None = Query(None, description="Partial match on series, e.g. 'iPhone 15'"),
     storage_size: int | None = Query(None, description="Exact match, in GB, e.g. 256"),
@@ -30,6 +32,13 @@ def search_products(
     db: Session = Depends(get_db),
     current_user=Depends(auth.get_current_user),
 ):
+    parsed_location_ids: list[int] = []
+    if location_ids:
+        try:
+            parsed_location_ids = [int(x) for x in location_ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="location_ids must be a comma-separated list of integers")
+
     query = db.query(models.Product)
 
     if not include_inactive:
@@ -59,42 +68,49 @@ def search_products(
 
     products = query.order_by(models.Product.name).all()
 
-    if not location_id:
+    if not parsed_location_ids:
         # No location filter -> just return products, quantity omitted
         return [
             schemas.ProductStockOut(**schemas.ProductOut.model_validate(p).model_dump())
             for p in products
         ]
 
-    # Location filter -> only return products that actually have stock there,
-    # pulling quantity from the current_stock view defined in schema.sql
+    # Location filter -> only return products that actually have stock at one of
+    # these locations, pulling quantity from the current_stock view defined in schema.sql
     product_ids = [p.id for p in products]
     if not product_ids:
         return []
 
     rows = db.execute(
         text(
-            "SELECT product_id, quantity FROM current_stock "
-            "WHERE location_id = :loc AND product_id = ANY(:ids)"
+            "SELECT product_id, location_id, quantity FROM current_stock "
+            "WHERE location_id = ANY(:locs) AND product_id = ANY(:ids)"
         ),
-        {"loc": location_id, "ids": product_ids},
+        {"locs": parsed_location_ids, "ids": product_ids},
     ).fetchall()
-    qty_by_product = {row.product_id: row.quantity for row in rows}
 
-    location = db.query(models.Location).filter(models.Location.id == location_id).first()
-    location_name = location.name if location else None
+    single_location = len(parsed_location_ids) == 1
+    location_name = None
+    if single_location:
+        location = db.query(models.Location).filter(models.Location.id == parsed_location_ids[0]).first()
+        location_name = location.name if location else None
+
+    # product_id -> quantity (only meaningful when a single location is selected)
+    qty_by_product = {row.product_id: row.quantity for row in rows}
+    products_with_stock = {row.product_id for row in rows}
 
     results = []
     for p in products:
-        if p.id in qty_by_product:
-            results.append(
-                schemas.ProductStockOut(
-                    **schemas.ProductOut.model_validate(p).model_dump(),
-                    location_id=location_id,
-                    location_name=location_name,
-                    quantity=qty_by_product[p.id],
-                )
+        if p.id not in products_with_stock:
+            continue
+        results.append(
+            schemas.ProductStockOut(
+                **schemas.ProductOut.model_validate(p).model_dump(),
+                location_id=parsed_location_ids[0] if single_location else None,
+                location_name=location_name,
+                quantity=qty_by_product[p.id] if single_location else None,
             )
+        )
     return results
 
 

@@ -85,16 +85,18 @@ class InvoiceItem(Base):
 
 
 class ProductUnit(Base):
-    __tablename__ = "product_units"
+    __tablename__ = "products_actual"
 
     id = Column(Integer, primary_key=True)
     product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
     serial_number = Column(String(100), unique=True, nullable=False)
-    status = Column(String(20), nullable=False, default="in_stock")
+    status = Column(Integer, nullable=False, default=1)  # see config: category='product_unit_status'
     current_location_id = Column(Integer, ForeignKey("locations.id"))
     invoice_item_id = Column(Integer, ForeignKey("invoice_items.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(Integer, ForeignKey("users.id"))
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_by = Column(Integer, ForeignKey("users.id"))
 
     product = relationship("Product")
     location = relationship("Location")
@@ -134,7 +136,7 @@ class IssueItem(Base):
     id = Column(Integer, primary_key=True)
     issue_id = Column(Integer, ForeignKey("issues.id", ondelete="CASCADE"), nullable=False)
     product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
-    product_unit_id = Column(Integer, ForeignKey("product_units.id"))
+    product_unit_id = Column(Integer, ForeignKey("products_actual.id"))
     quantity = Column(Integer, nullable=False, default=1)
     unit_price = Column(Numeric(12, 2))
 
@@ -155,5 +157,20 @@ class StockTransaction(Base):
     quantity = Column(Integer, nullable=False, default=1)
     ref_type = Column(String(20))
     ref_id = Column(Integer)
+    ref_doc_number = Column(String(50))
+    direction = Column(String(3))
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class Config(Base):
+    __tablename__ = "config"
+
+    id = Column(Integer, primary_key=True)
+    category = Column(String(50), nullable=False)
+    key = Column(String(20), nullable=False)
+    value = Column(String(100), nullable=False)
+    description = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(Integer, ForeignKey("users.id"))
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_by = Column(Integer, ForeignKey("users.id"))

@@ -77,7 +77,7 @@ class ProductStockOut(ProductOut):
     """Product with stock quantity at a specific location (used for location search)."""
     location_id: int | None = None
     location_name: str | None = None
-    quantity: int = 0
+    quantity: int | None = None
 
 
 # ---------------- Locations ----------------

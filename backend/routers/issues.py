@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
-import models, schemas, auth
+import models, schemas, auth, status_codes
 
 router = APIRouter(prefix="/issues", tags=["issues"])
 
@@ -11,8 +11,8 @@ VALID_ISS_TRADE_CODES = {"01", "55", "99"}  # transfer, adjust, wasted
 # For non-transfer codes, the unit leaves inventory entirely and gets a terminal status.
 # '01' (transfer) is handled separately below since the unit moves rather than terminates.
 TERMINAL_STATUS_BY_TRADE_CODE = {
-    "55": "issued",
-    "99": "wasted",
+    "55": status_codes.PRODUCT_UNIT_ISSUED,
+    "99": status_codes.PRODUCT_UNIT_WASTED,
 }
 
 
@@ -129,7 +129,7 @@ def create_issue(
                 db.query(models.ProductUnit)
                 .filter(
                     models.ProductUnit.serial_number == line.serial_number,
-                    models.ProductUnit.status == "in_stock",
+                    models.ProductUnit.status == status_codes.PRODUCT_UNIT_IN_STOCK,
                     models.ProductUnit.current_location_id == payload.location_id,
                 )
                 .first()
@@ -205,7 +205,7 @@ def create_issue(
             if is_transfer:
                 # The unit moves: stays in_stock, but now at the destination location.
                 unit.current_location_id = payload.to_location_id
-                unit.status = "in_stock"
+                unit.status = status_codes.PRODUCT_UNIT_IN_STOCK
                 db.add(
                     models.StockTransaction(
                         trade_type="RCV",

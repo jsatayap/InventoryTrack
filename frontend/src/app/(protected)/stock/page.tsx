@@ -24,6 +24,20 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ChevronDown, ChevronsUpDown } from "lucide-react";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationPrevious,
+  PaginationNext,
+} from "@/components/ui/pagination";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 function formatDateTime(value?: string | null) {
   if (!value) return "Not available";
@@ -50,6 +64,9 @@ export default function CurrentStockPage() {
 
   const [selectedRow, setSelectedRow] = useState<CurrentStockRow | null>(null);
 
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
+
   useEffect(() => {
     api.get<Location[]>("/locations").then(setLocations).catch(() => {});
     api
@@ -70,6 +87,7 @@ export default function CurrentStockPage() {
       });
       const data = await api.get<CurrentStockRow[]>(`/stock/current${query}`);
       setRows(data);
+      setCurrentPage(1);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not load current stock.");
     } finally {
@@ -86,6 +104,7 @@ export default function CurrentStockPage() {
     setSelectedLocationIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
+    setCurrentPage(1);
   }
 
   function clearAllFilters() {
@@ -115,6 +134,15 @@ export default function CurrentStockPage() {
   });
 
   const totalQuantity = filteredRows.reduce((sum, r) => sum + r.quantity, 0);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const pageStart = (currentPage - 1) * pageSize;
+  const pagedRows = filteredRows.slice(pageStart, pageStart + pageSize);
+
+  function handlePageSizeChange(value: string) {
+    setPageSize(Number(value));
+    setCurrentPage(1);
+  }
 
   const selectedProduct = selectedRow ? productsById[selectedRow.product_id] : null;
 
@@ -197,7 +225,10 @@ export default function CurrentStockPage() {
                   type="number"
                   min={0}
                   value={minStorage}
-                  onChange={(e) => setMinStorage(e.target.value ? Number(e.target.value) : "")}
+                  onChange={(e) => {
+                    setMinStorage(e.target.value ? Number(e.target.value) : "");
+                    setCurrentPage(1);
+                  }}
                 />
               </Field>
               <Field>
@@ -207,12 +238,22 @@ export default function CurrentStockPage() {
                   type="number"
                   min={0}
                   value={maxStorage}
-                  onChange={(e) => setMaxStorage(e.target.value ? Number(e.target.value) : "")}
+                  onChange={(e) => {
+                    setMaxStorage(e.target.value ? Number(e.target.value) : "");
+                    setCurrentPage(1);
+                  }}
                 />
               </Field>
               <Field>
                 <FieldLabel htmlFor="stock-color">Color</FieldLabel>
-                <Input id="stock-color" value={color} onChange={(e) => setColor(e.target.value)} />
+                <Input
+                  id="stock-color"
+                  value={color}
+                  onChange={(e) => {
+                    setColor(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                />
               </Field>
             </div>
           </CollapsibleContent>
@@ -244,14 +285,14 @@ export default function CurrentStockPage() {
                   Loading…
                 </td>
               </tr>
-            ) : filteredRows.length === 0 ? (
+            ) : pagedRows.length === 0 ? (
               <tr>
                 <td colSpan={8} className="px-3 py-6 text-center text-neutral-400">
                   No stock found.
                 </td>
               </tr>
             ) : (
-              filteredRows.map((r, i) => (
+              pagedRows.map((r, i) => (
                 <tr
                   key={`${r.product_id}-${r.location_id}-${i}`}
                   onClick={() => setSelectedRow(r)}
@@ -282,6 +323,58 @@ export default function CurrentStockPage() {
             </tfoot>
           )}
         </table>
+      </div>
+
+      <div className="flex items-center justify-between mt-4">
+        <Field orientation="horizontal" className="items-center gap-2 w-auto">
+          <FieldLabel htmlFor="page-size" className="font-normal text-neutral-500">
+            Rows per page
+          </FieldLabel>
+          <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
+            <SelectTrigger id="page-size" className="w-[80px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="5">5</SelectItem>
+              <SelectItem value="10">10</SelectItem>
+              <SelectItem value="20">20</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+
+        <div className="flex items-center gap-4">
+          <p className="text-sm text-neutral-500">
+            Page {currentPage} of {totalPages}
+          </p>
+          <Pagination className="mx-0 w-auto">
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setCurrentPage((p) => Math.max(1, p - 1));
+                  }}
+                  aria-disabled={currentPage === 1}
+                  className={currentPage === 1 ? "pointer-events-none opacity-50" : undefined}
+                />
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationNext
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setCurrentPage((p) => Math.min(totalPages, p + 1));
+                  }}
+                  aria-disabled={currentPage === totalPages}
+                  className={
+                    currentPage === totalPages ? "pointer-events-none opacity-50" : undefined
+                  }
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        </div>
       </div>
 
       <Dialog open={selectedRow !== null} onOpenChange={(open) => !open && setSelectedRow(null)}>
