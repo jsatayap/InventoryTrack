@@ -3,6 +3,25 @@
 import { useEffect, useState, FormEvent, Fragment } from "react";
 import { api, buildQuery, ApiError } from "@/lib/api";
 import { Location, Product, Issue, NewIssueItem } from "@/lib/types";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Field, FieldLabel, FieldGroup } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { X } from "lucide-react";
 
 const TRADE_CODES = [
   { code: "01", label: "Transfer" },
@@ -10,13 +29,23 @@ const TRADE_CODES = [
   { code: "99", label: "Wasted" },
 ];
 
-interface LineDraft {
-  product_id: string;
-  serialInput: string;
-  quantityInput: number;
+function Required() {
+  return <span className="text-red-600">*</span>;
 }
 
-const emptyLine: LineDraft = { product_id: "", serialInput: "", quantityInput: 1 };
+interface SerialLineDraft {
+  product_id: string;
+  serials: string[];
+  serialInput: string;
+}
+
+interface QuantityLineDraft {
+  product_id: string;
+  quantity: number;
+}
+
+const emptySerialLine: SerialLineDraft = { product_id: "", serials: [], serialInput: "" };
+const emptyQuantityLine: QuantityLineDraft = { product_id: "", quantity: 1 };
 
 export default function IssuePage() {
   const [locations, setLocations] = useState<Location[]>([]);
@@ -29,15 +58,20 @@ export default function IssuePage() {
   const [filterLocation, setFilterLocation] = useState<number | "">("");
 
   // form state
+  const [showAddForm, setShowAddForm] = useState(false);
   const [issueNo, setIssueNo] = useState("");
   const [locationId, setLocationId] = useState<number | "">("");
   const [toLocationId, setToLocationId] = useState<number | "">("");
-  const [reasonMode, setReasonMode] = useState<"trade_code" | "trade_description">("trade_code");
   const [tradeCode, setTradeCode] = useState("01");
   const [remark, setRemark] = useState("");
-  const [lines, setLines] = useState<LineDraft[]>([{ ...emptyLine }]);
+  const [serialLines, setSerialLines] = useState<SerialLineDraft[]>([{ ...emptySerialLine }]);
+  const [quantityLines, setQuantityLines] = useState<QuantityLineDraft[]>([{ ...emptyQuantityLine }]);
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  const isTransfer = tradeCode === "01";
+  const serializedProducts = products.filter((p) => p.is_serialized);
+  const nonSerializedProducts = products.filter((p) => !p.is_serialized);
 
   useEffect(() => {
     api.get<Location[]>("/locations").then(setLocations).catch(() => {});
@@ -63,16 +97,59 @@ export default function IssuePage() {
     return products.find((p) => p.id === id);
   }
 
-  function updateLine(index: number, patch: Partial<LineDraft>) {
-    setLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
+  function resetForm() {
+    setIssueNo("");
+    setLocationId("");
+    setToLocationId("");
+    setTradeCode("01");
+    setRemark("");
+    setSerialLines([{ ...emptySerialLine }]);
+    setQuantityLines([{ ...emptyQuantityLine }]);
+    setFormError(null);
   }
 
-  function addLine() {
-    setLines((prev) => [...prev, { ...emptyLine }]);
+  function updateSerialLine(index: number, patch: Partial<SerialLineDraft>) {
+    setSerialLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
   }
 
-  function removeLine(index: number) {
-    setLines((prev) => prev.filter((_, i) => i !== index));
+  function addSerialLine() {
+    setSerialLines((prev) => [...prev, { ...emptySerialLine }]);
+  }
+
+  function removeSerialLine(index: number) {
+    setSerialLines((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function stageSerial(e: FormEvent, index: number) {
+    e.preventDefault();
+    const line = serialLines[index];
+    const serial = line.serialInput.trim();
+    if (!serial) return;
+    if (line.serials.some((s) => s.toLowerCase() === serial.toLowerCase())) {
+      setFormError(`"${serial}" is already added to this line.`);
+      return;
+    }
+    updateSerialLine(index, { serials: [...line.serials, serial], serialInput: "" });
+    setFormError(null);
+  }
+
+  function removeStagedSerial(lineIndex: number, serialIndex: number) {
+    const line = serialLines[lineIndex];
+    updateSerialLine(lineIndex, {
+      serials: line.serials.filter((_, i) => i !== serialIndex),
+    });
+  }
+
+  function updateQuantityLine(index: number, patch: Partial<QuantityLineDraft>) {
+    setQuantityLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
+  }
+
+  function addQuantityLine() {
+    setQuantityLines((prev) => [...prev, { ...emptyQuantityLine }]);
+  }
+
+  function removeQuantityLine(index: number) {
+    setQuantityLines((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -83,35 +160,42 @@ export default function IssuePage() {
       setFormError("Select a location.");
       return;
     }
-    if (tradeCode === "01" && !toLocationId) {
+    if (isTransfer && !toLocationId) {
       setFormError("Select a destination location for the transfer.");
       return;
     }
-    if (tradeCode === "01" && toLocationId === locationId) {
+    if (isTransfer && toLocationId === locationId) {
       setFormError("Destination must be different from the source location.");
       return;
     }
 
     const items: NewIssueItem[] = [];
-    for (const line of lines) {
+
+    for (const line of serialLines) {
+      if (!line.product_id) continue;
       const product = productById(line.product_id);
-      if (!product) {
-        setFormError("Every line needs a product selected.");
+      if (line.serials.length === 0) {
+        setFormError(`Add at least one serial number for ${product?.name ?? "the selected product"}.`);
         return;
       }
-      if (product.is_serialized) {
-        if (!line.serialInput.trim()) {
-          setFormError(`Enter a serial number for ${product.name}.`);
-          return;
-        }
-        items.push({ product_id: product.id, serial_number: line.serialInput.trim() });
-      } else {
-        if (line.quantityInput <= 0) {
-          setFormError(`Enter a quantity greater than 0 for ${product.name}.`);
-          return;
-        }
-        items.push({ product_id: product.id, quantity: line.quantityInput });
+      for (const serial of line.serials) {
+        items.push({ product_id: line.product_id, serial_number: serial });
       }
+    }
+
+    for (const line of quantityLines) {
+      if (!line.product_id) continue;
+      const product = productById(line.product_id);
+      if (line.quantity <= 0) {
+        setFormError(`Enter a quantity greater than 0 for ${product?.name ?? "the selected product"}.`);
+        return;
+      }
+      items.push({ product_id: line.product_id, quantity: line.quantity });
+    }
+
+    if (items.length === 0) {
+      setFormError("Add at least one item.");
+      return;
     }
 
     setIsSaving(true);
@@ -119,17 +203,14 @@ export default function IssuePage() {
       await api.post("/issues", {
         issue_no: issueNo,
         location_id: locationId,
-        to_location_id: tradeCode === "01" ? toLocationId : undefined,
-        reason_type: reasonMode,
+        to_location_id: isTransfer ? toLocationId : undefined,
+        reason_type: "trade_description",
         trade_code: tradeCode,
         remark: remark || undefined,
         items,
       });
-      setIssueNo("");
-      setLocationId("");
-      setToLocationId("");
-      setRemark("");
-      setLines([{ ...emptyLine }]);
+      resetForm();
+      setShowAddForm(false);
       fetchIssues();
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Could not create issue.");
@@ -140,180 +221,274 @@ export default function IssuePage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-neutral-900 mb-6">Issue</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-xl font-semibold text-neutral-900">Issue</h1>
+        <Dialog
+          open={showAddForm}
+          onOpenChange={(open) => {
+            setShowAddForm(open);
+            if (!open) resetForm();
+          }}
+        >
+          <DialogTrigger
+            render={
+              <Button className="bg-[#1E3A5F] text-white hover:bg-[#16304d]">
+                New Issue
+              </Button>
+            }
+          />
+          <DialogContent className="sm:max-w-3xl max-h-[85vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle>New Issue</DialogTitle>
+            </DialogHeader>
 
-      <form onSubmit={handleSubmit} className="border border-neutral-300 bg-white p-4 mb-8">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-          <label className="block">
-            <span className="block text-xs text-neutral-500 mb-1">Issue No.</span>
-            <input
-              required
-              value={issueNo}
-              onChange={(e) => setIssueNo(e.target.value)}
-              className="input"
-              placeholder="ISS-0001"
-            />
-          </label>
-          <label className="block">
-            <span className="block text-xs text-neutral-500 mb-1">Location</span>
-            <select
-              required
-              value={locationId}
-              onChange={(e) => setLocationId(e.target.value ? Number(e.target.value) : "")}
-              className="input"
-            >
-              <option value="">Select…</option>
-              {locations.map((loc) => (
-                <option key={loc.id} value={loc.id}>
-                  {loc.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block">
-            <span className="block text-xs text-neutral-500 mb-1">Remark (optional)</span>
-            <input value={remark} onChange={(e) => setRemark(e.target.value)} className="input" />
-          </label>
-        </div>
-
-        <div className="mb-4">
-          <span className="block text-xs text-neutral-500 mb-2">Reason</span>
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex gap-3 text-sm">
-              <label className="flex items-center gap-1.5">
-                <input
-                  type="radio"
-                  checked={reasonMode === "trade_code"}
-                  onChange={() => setReasonMode("trade_code")}
-                />
-                By trade code
-              </label>
-              <label className="flex items-center gap-1.5">
-                <input
-                  type="radio"
-                  checked={reasonMode === "trade_description"}
-                  onChange={() => setReasonMode("trade_description")}
-                />
-                By description
-              </label>
-            </div>
-
-            {reasonMode === "trade_code" ? (
-              <select value={tradeCode} onChange={(e) => setTradeCode(e.target.value)} className="input w-auto">
-                {TRADE_CODES.map((t) => (
-                  <option key={t.code} value={t.code}>
-                    {t.code}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <select value={tradeCode} onChange={(e) => setTradeCode(e.target.value)} className="input w-auto">
-                {TRADE_CODES.map((t) => (
-                  <option key={t.code} value={t.code}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-        </div>
-
-        {tradeCode === "01" && (
-          <div className="mb-4">
-            <label className="block max-w-xs">
-              <span className="block text-xs text-neutral-500 mb-1">Transfer to location</span>
-              <select
-                required
-                value={toLocationId}
-                onChange={(e) => setToLocationId(e.target.value ? Number(e.target.value) : "")}
-                className="input"
-              >
-                <option value="">Select destination…</option>
-                {locations
-                  .filter((loc) => loc.id !== locationId)
-                  .map((loc) => (
-                    <option key={loc.id} value={loc.id}>
-                      {loc.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-          </div>
-        )}
-
-        <div className="border border-neutral-200">
-          <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-neutral-50 text-xs text-neutral-500 font-medium">
-            <div className="col-span-5">Product</div>
-            <div className="col-span-5">Serial / Quantity</div>
-            <div className="col-span-2 text-right"></div>
-          </div>
-          {lines.map((line, i) => {
-            const product = productById(line.product_id);
-            return (
-              <div key={i} className="grid grid-cols-12 gap-2 px-3 py-2 border-t border-neutral-200 items-center">
-                <select
-                  className="input col-span-5"
-                  value={line.product_id || ""}
-                  onChange={(e) => updateLine(i, { product_id: e.target.value })}
-                >
-                  <option value="">Select product…</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} {p.storage_size != null ? `(${p.storage_size} GB)` : ""}
-                    </option>
-                  ))}
-                </select>
-
-                {!line.product_id ? (
-                  <div className="col-span-5 text-xs text-neutral-400">Pick a product first</div>
-                ) : product?.is_serialized ? (
-                  <input
-                    placeholder="Serial / IMEI"
-                    value={line.serialInput}
-                    onChange={(e) => updateLine(i, { serialInput: e.target.value })}
-                    className="input col-span-5"
-                  />
-                ) : (
-                  <input
-                    type="number"
-                    min={1}
-                    value={line.quantityInput}
-                    onChange={(e) => updateLine(i, { quantityInput: Number(e.target.value) })}
-                    className="input col-span-5"
-                  />
-                )}
-
-                <div className="col-span-2 text-right">
-                  {lines.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeLine(i)}
-                      className="text-sm text-red-600 hover:underline"
+            <form onSubmit={handleSubmit} className="overflow-y-auto pr-1 -mr-1">
+              <FieldGroup>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <Field>
+                    <FieldLabel htmlFor="issue-no">
+                      Issue No. <Required />
+                    </FieldLabel>
+                    <Input
+                      id="issue-no"
+                      required
+                      value={issueNo}
+                      onChange={(e) => setIssueNo(e.target.value)}
+                      placeholder="ISS-0001"
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="issue-location">
+                      Location <Required />
+                    </FieldLabel>
+                    <select
+                      id="issue-location"
+                      required
+                      value={locationId}
+                      onChange={(e) => setLocationId(e.target.value ? Number(e.target.value) : "")}
+                      className="input"
                     >
-                      Remove
-                    </button>
-                  )}
+                      <option value="">Select…</option>
+                      {locations.map((loc) => (
+                        <option key={loc.id} value={loc.id}>
+                          {loc.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="issue-remark">Remark</FieldLabel>
+                    <Input id="issue-remark" value={remark} onChange={(e) => setRemark(e.target.value)} />
+                  </Field>
                 </div>
-              </div>
-            );
-          })}
-        </div>
 
-        <button type="button" onClick={addLine} className="text-sm text-[#1E3A5F] hover:underline mt-3">
-          + Add line
-        </button>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Field>
+                    <FieldLabel htmlFor="issue-reason">
+                      Reason <Required />
+                    </FieldLabel>
+                    <Select value={tradeCode} onValueChange={setTradeCode}>
+                      <SelectTrigger id="issue-reason">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TRADE_CODES.map((t) => (
+                          <SelectItem key={t.code} value={t.code}>
+                            {t.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="issue-to-location">
+                      Transfer to location {isTransfer && <Required />}
+                    </FieldLabel>
+                    <select
+                      id="issue-to-location"
+                      required={isTransfer}
+                      disabled={!isTransfer}
+                      value={toLocationId}
+                      onChange={(e) => setToLocationId(e.target.value ? Number(e.target.value) : "")}
+                      className="input disabled:bg-neutral-100 disabled:text-neutral-400"
+                    >
+                      <option value="">Select destination…</option>
+                      {locations
+                        .filter((loc) => loc.id !== locationId)
+                        .map((loc) => (
+                          <option key={loc.id} value={loc.id}>
+                            {loc.name}
+                          </option>
+                        ))}
+                    </select>
+                  </Field>
+                </div>
 
-        <div className="flex items-center gap-3 mt-4">
-          <button
-            type="submit"
-            disabled={isSaving}
-            className="bg-[#1E3A5F] text-white text-sm font-medium px-4 py-2 hover:bg-[#16304d] disabled:opacity-50 transition-colors"
-          >
-            {isSaving ? "Submitting…" : "Submit issue"}
-          </button>
-          {formError && <p className="text-sm text-red-700">{formError}</p>}
-        </div>
-      </form>
+                <div>
+                  <p className="text-xs text-neutral-500 font-medium mb-2">
+                    Serialized items
+                  </p>
+                  <div className="border border-neutral-200">
+                    <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-neutral-50 text-xs text-neutral-500 font-medium">
+                      <div className="col-span-4">Product</div>
+                      <div className="col-span-6">Serial numbers</div>
+                      <div className="col-span-1 text-center">Qty</div>
+                      <div className="col-span-1"></div>
+                    </div>
+                    {serialLines.map((line, i) => (
+                      <div key={i} className="grid grid-cols-12 gap-2 px-3 py-3 border-t border-neutral-200">
+                        <select
+                          className="input col-span-4 self-start"
+                          value={line.product_id}
+                          onChange={(e) => updateSerialLine(i, { product_id: e.target.value })}
+                        >
+                          <option value="">Select product…</option>
+                          {serializedProducts.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} {p.storage_size != null ? `(${p.storage_size} GB)` : ""}
+                            </option>
+                          ))}
+                        </select>
+
+                        <div className="col-span-6">
+                          <div className="flex gap-2">
+                            <Input
+                              placeholder="Scan or type serial / IMEI, then press Enter"
+                              value={line.serialInput}
+                              disabled={!line.product_id}
+                              onChange={(e) => updateSerialLine(i, { serialInput: e.target.value })}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") stageSerial(e as unknown as FormEvent, i);
+                              }}
+                            />
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={!line.product_id}
+                              onClick={(e) => stageSerial(e, i)}
+                            >
+                              Add
+                            </Button>
+                          </div>
+                          {line.serials.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                              {line.serials.map((serial, si) => (
+                                <Badge
+                                  key={`${serial}-${si}`}
+                                  variant="secondary"
+                                  className="gap-1 pr-1 font-mono text-xs"
+                                >
+                                  {serial}
+                                  <button
+                                    type="button"
+                                    onClick={() => removeStagedSerial(i, si)}
+                                    aria-label={`Remove ${serial}`}
+                                    className="rounded-sm hover:bg-neutral-300/60 p-0.5"
+                                  >
+                                    <X className="size-3" />
+                                  </button>
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="col-span-1 text-center font-medium self-start pt-2">
+                          {line.serials.length}
+                        </div>
+
+                        <div className="col-span-1 text-right self-start">
+                          {serialLines.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="text-red-600 hover:text-red-700"
+                              onClick={() => removeSerialLine(i)}
+                              aria-label="Remove line"
+                            >
+                              <X className="size-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <Button type="button" variant="ghost" onClick={addSerialLine} className="mt-2">
+                    + Add product
+                  </Button>
+                </div>
+
+                <div>
+                  <p className="text-xs text-neutral-500 font-medium mb-2">
+                    Quantity items
+                  </p>
+                  <div className="border border-neutral-200">
+                    <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-neutral-50 text-xs text-neutral-500 font-medium">
+                      <div className="col-span-8">Product</div>
+                      <div className="col-span-2">Quantity</div>
+                      <div className="col-span-2"></div>
+                    </div>
+                    {quantityLines.map((line, i) => (
+                      <div
+                        key={i}
+                        className="grid grid-cols-12 gap-2 px-3 py-2 border-t border-neutral-200 items-center"
+                      >
+                        <select
+                          className="input col-span-8"
+                          value={line.product_id}
+                          onChange={(e) => updateQuantityLine(i, { product_id: e.target.value })}
+                        >
+                          <option value="">Select product…</option>
+                          {nonSerializedProducts.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} {p.storage_size != null ? `(${p.storage_size} GB)` : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <Input
+                          type="number"
+                          min={1}
+                          className="col-span-2"
+                          value={line.quantity}
+                          disabled={!line.product_id}
+                          onChange={(e) => updateQuantityLine(i, { quantity: Number(e.target.value) })}
+                        />
+                        <div className="col-span-2 text-right">
+                          {quantityLines.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-600 hover:text-red-700"
+                              onClick={() => removeQuantityLine(i)}
+                            >
+                              Remove
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <Button type="button" variant="ghost" onClick={addQuantityLine} className="mt-2">
+                    + Add product
+                  </Button>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <Button type="submit" disabled={isSaving}>
+                    {isSaving ? "Submitting…" : "Submit issue"}
+                  </Button>
+                  <Button type="button" variant="ghost" onClick={() => setShowAddForm(false)}>
+                    Cancel
+                  </Button>
+                  {formError && <p className="text-sm text-red-700">{formError}</p>}
+                </div>
+              </FieldGroup>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
 
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-medium text-neutral-700">Issue history</h2>
@@ -330,12 +505,9 @@ export default function IssuePage() {
               </option>
             ))}
           </select>
-          <button
-            onClick={fetchIssues}
-            className="bg-neutral-900 text-white text-sm font-medium px-3 py-2 hover:bg-neutral-700 transition-colors"
-          >
+          <Button onClick={fetchIssues} variant="secondary">
             Filter
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -380,7 +552,7 @@ export default function IssuePage() {
                       <td className="px-3 py-2 font-mono text-xs">{iss.issue_no}</td>
                       <td className="px-3 py-2 text-neutral-600">{iss.location_name}</td>
                       <td className="px-3 py-2 text-neutral-500">
-                        {iss.trade_code} · {label}
+                        {label}
                         {iss.to_location_name && (
                           <span className="text-neutral-400"> → {iss.to_location_name}</span>
                         )}
