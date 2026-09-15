@@ -174,7 +174,7 @@ export default function InvoicesPage() {
   const filteredInvoices = invoices.filter((inv) => {
     const locationMatch =
       selectedLocationNames.length === 0 || selectedLocationNames.includes(inv.location_name);
-    const statusMatch = selectedStatuses.length === 0 || selectedStatuses.includes(inv.status);
+    const statusMatch = selectedStatuses.length === 0 || selectedStatuses.includes(inv.status_label ?? "");
     return locationMatch && statusMatch;
   });
 
@@ -421,7 +421,9 @@ export default function InvoicesPage() {
                   <td className="px-3 py-2 text-neutral-500">{inv.invoice_date}</td>
                   <td className="px-3 py-2 text-neutral-500">{inv.items.length}</td>
                   <td className="px-3 py-2">
-                    <span className={STATUS_STYLES[inv.status] ?? ""}>{inv.status}</span>
+                    <span className={STATUS_STYLES[inv.status_label ?? ""] ?? ""}>
+                      {inv.status_label ?? inv.status}
+                    </span>
                   </td>
                 </tr>
               ))

@@ -59,3 +59,38 @@ def get_stock_tracking(
         {"location_id": location_id, "product_name": product_name, "status": status},
     ).mappings().all()
     return [schemas.StockTrackingOut(**row) for row in rows]
+
+
+@router.get("/transactions", response_model=list[schemas.StockTransactionOut])
+def get_stock_transactions(
+    location_id: int | None = Query(None),
+    product_name: str | None = Query(None, description="Partial match on product name"),
+    trade_type: str | None = Query(None, description="RCV (receive) or ISS (issue)"),
+    db: Session = Depends(get_db),
+    current_user=Depends(auth.get_current_user),
+):
+    """Chronological log of every receive/issue movement, newest first.
+
+    Reads directly from stock_transactions (not a view), joined to products and
+    locations for display names. This is the authoritative "what happened, when"
+    record -- unlike stock_tracking, which only reflects current state.
+    """
+    sql = """
+        SELECT
+            t.id, t.trade_type, t.trade_code, t.product_id, p.name AS product_name,
+            t.location_id, l.name AS location_name, t.serial_number, t.quantity,
+            t.ref_type, t.ref_id, t.ref_doc_number, t.direction,
+            t.created_by, t.created_at
+        FROM stock_transactions t
+        JOIN products p ON p.id = t.product_id
+        JOIN locations l ON l.id = t.location_id
+        WHERE (:location_id IS NULL OR t.location_id = :location_id)
+          AND (:product_name IS NULL OR p.name ILIKE '%' || :product_name || '%')
+          AND (:trade_type IS NULL OR t.trade_type = :trade_type)
+        ORDER BY t.created_at DESC, t.id DESC
+    """
+    rows = db.execute(
+        text(sql),
+        {"location_id": location_id, "product_name": product_name, "trade_type": trade_type},
+    ).mappings().all()
+    return [schemas.StockTransactionOut(**row) for row in rows]

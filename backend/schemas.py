@@ -176,6 +176,7 @@ class ReceiveQuantityRequest(BaseModel):
 class ReceiveResultOut(BaseModel):
     invoice_id: int
     invoice_status: int  # see config: category='invoice'
+    invoice_status_label: str | None = None  # e.g. "receiving" — resolved from config
     product_id: uuid.UUID
     item_received_qty: int
     item_quantity: int
@@ -255,3 +256,24 @@ class StockTrackingOut(BaseModel):
     control_serial: str | None = None
     non_control_amount: int | None = None
     status: str
+
+
+class StockTransactionOut(BaseModel):
+    id: int
+    trade_type: str  # 'RCV' | 'ISS'
+    trade_code: int
+    product_id: uuid.UUID
+    product_name: str | None = None
+    location_id: int
+    location_name: str | None = None
+    serial_number: str | None = None
+    quantity: int
+    ref_type: str | None = None
+    ref_id: int | None = None
+    ref_doc_number: str | None = None
+    direction: str | None = None
+    created_by: int | None = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

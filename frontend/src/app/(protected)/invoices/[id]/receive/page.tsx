@@ -4,7 +4,7 @@ import { useEffect, useState, FormEvent, KeyboardEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
-import { Invoice, Product, ReceiveResult } from "@/lib/types";
+import { INVOICE_STATUS, Invoice, Product, ReceiveResult } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -68,7 +68,7 @@ export default function ReceivePage() {
       if (!prev) return prev;
       return {
         ...prev,
-        status: result.invoice_status as Invoice["status"],
+        status: result.invoice_status,
         items: prev.items.map((item) =>
           item.product_id === productId ? { ...item, received_qty: result.item_received_qty } : item
         ),
@@ -189,7 +189,7 @@ export default function ReceivePage() {
     );
   }
 
-  const isCompleted = invoice.status === "completed";
+  const isCompleted = invoice.status === INVOICE_STATUS.COMPLETED;
 
   return (
     <div>

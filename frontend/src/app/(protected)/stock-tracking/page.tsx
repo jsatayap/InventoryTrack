@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import { Location, StockTrackingRow } from "@/lib/types";
+import { Location, StockTransactionRow } from "@/lib/types";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -28,27 +28,37 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ChevronDown } from "lucide-react";
 
-const STATUS_STYLES: Record<string, string> = {
-  in_stock: "text-green-700",
-  issued: "text-amber-700",
-  wasted: "text-red-700",
+const TYPE_STYLES: Record<string, string> = {
+  RCV: "text-green-700",
+  ISS: "text-amber-700",
 };
 
-const STATUS_OPTIONS = ["in_stock", "issued", "wasted"];
-const STATUS_LABELS: Record<string, string> = {
-  in_stock: "In stock",
-  issued: "Issued",
-  wasted: "Wasted",
+const TYPE_OPTIONS = ["RCV", "ISS"];
+const TYPE_LABELS: Record<string, string> = {
+  RCV: "Receive",
+  ISS: "Issue",
 };
 
-export default function StockTrackingPage() {
-  const [rows, setRows] = useState<StockTrackingRow[]>([]);
+function formatDateTime(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export default function StockTransactionsPage() {
+  const [rows, setRows] = useState<StockTransactionRow[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [selectedLocationIds, setSelectedLocationIds] = useState<number[]>([]);
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
+  const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
   const [productName, setProductName] = useState("");
 
   const [pageSize, setPageSize] = useState(10);
@@ -56,19 +66,20 @@ export default function StockTrackingPage() {
 
   useEffect(() => {
     api.get<Location[]>("/locations").then(setLocations).catch(() => {});
-    fetchTracking();
+    fetchTransactions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function fetchTracking() {
+  async function fetchTransactions() {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await api.get<StockTrackingRow[]>("/stock/tracking");
+      // Backend already orders by created_at DESC, so the newest transaction is first.
+      const data = await api.get<StockTransactionRow[]>("/stock/transactions");
       setRows(data);
       setCurrentPage(1);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not load stock tracking.");
+      setError(err instanceof ApiError ? err.message : "Could not load stock transactions.");
     } finally {
       setIsLoading(false);
     }
@@ -81,37 +92,39 @@ export default function StockTrackingPage() {
     setCurrentPage(1);
   }
 
-  function toggleStatusFilter(s: string) {
-    setSelectedStatuses((prev) =>
-      prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]
+  function toggleTypeFilter(t: string) {
+    setSelectedTypes((prev) =>
+      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
     );
     setCurrentPage(1);
   }
 
   function clearFilters() {
     setSelectedLocationIds([]);
-    setSelectedStatuses([]);
+    setSelectedTypes([]);
     setProductName("");
     setCurrentPage(1);
   }
 
-  const selectedLocationNames = locations
-    .filter((l) => selectedLocationIds.includes(l.id))
-    .map((l) => l.name);
-
   const filteredRows = rows.filter((r) => {
     const locationMatch =
-      selectedLocationNames.length === 0 || selectedLocationNames.includes(r.location_name);
-    const statusMatch = selectedStatuses.length === 0 || selectedStatuses.includes(r.status);
+      selectedLocationIds.length === 0 || selectedLocationIds.includes(r.location_id);
+    const typeMatch = selectedTypes.length === 0 || selectedTypes.includes(r.trade_type);
     const nameMatch =
       productName.trim() === "" ||
-      r.product_name.toLowerCase().includes(productName.trim().toLowerCase());
-    return locationMatch && statusMatch && nameMatch;
+      (r.product_name ?? "").toLowerCase().includes(productName.trim().toLowerCase());
+    return locationMatch && typeMatch && nameMatch;
   });
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  // Rows already arrive sorted newest-first from the API; re-sort defensively in case
+  // filters/pagination logic is ever reused against a differently-ordered source.
+  const sortedRows = [...filteredRows].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
   const pageStart = (currentPage - 1) * pageSize;
-  const pagedRows = filteredRows.slice(pageStart, pageStart + pageSize);
+  const pagedRows = sortedRows.slice(pageStart, pageStart + pageSize);
 
   function handlePageSizeChange(value: string) {
     setPageSize(Number(value));
@@ -119,11 +132,11 @@ export default function StockTrackingPage() {
   }
 
   const hasFilters =
-    selectedLocationIds.length > 0 || selectedStatuses.length > 0 || productName.trim() !== "";
+    selectedLocationIds.length > 0 || selectedTypes.length > 0 || productName.trim() !== "";
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-neutral-900 mb-6">Stock Tracking</h1>
+      <h1 className="text-xl font-semibold text-neutral-900 mb-6">Stock Transactions</h1>
 
       <div className="border border-neutral-300 bg-white p-4 mb-4 flex flex-wrap gap-3 items-center">
         <DropdownMenu>
@@ -157,22 +170,22 @@ export default function StockTrackingPage() {
             render={
               <Button variant="outline" className="justify-between min-w-[160px]">
                 <span>
-                  Status
-                  {selectedStatuses.length > 0 ? ` (${selectedStatuses.length})` : ""}
+                  Type
+                  {selectedTypes.length > 0 ? ` (${selectedTypes.length})` : ""}
                 </span>
                 <ChevronDown className="size-4 opacity-50" />
               </Button>
             }
           />
           <DropdownMenuContent align="start">
-            {STATUS_OPTIONS.map((s) => (
+            {TYPE_OPTIONS.map((t) => (
               <DropdownMenuCheckboxItem
-                key={s}
-                checked={selectedStatuses.includes(s)}
-                onCheckedChange={() => toggleStatusFilter(s)}
+                key={t}
+                checked={selectedTypes.includes(t)}
+                onCheckedChange={() => toggleTypeFilter(t)}
                 onSelect={(e) => e.preventDefault()}
               >
-                {STATUS_LABELS[s]}
+                {TYPE_LABELS[t]}
               </DropdownMenuCheckboxItem>
             ))}
           </DropdownMenuContent>
@@ -203,44 +216,44 @@ export default function StockTrackingPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-neutral-300 bg-neutral-50 text-left text-neutral-500">
-              <th className="px-3 py-2 font-medium">Location</th>
+              <th className="px-3 py-2 font-medium">Date</th>
+              <th className="px-3 py-2 font-medium">Type</th>
               <th className="px-3 py-2 font-medium">Product</th>
-              <th className="px-3 py-2 font-medium">Series</th>
-              <th className="px-3 py-2 font-medium">Storage</th>
-              <th className="px-3 py-2 font-medium">Color</th>
-              <th className="px-3 py-2 font-medium">RAM</th>
+              <th className="px-3 py-2 font-medium">Location</th>
               <th className="px-3 py-2 font-medium">Serial / Qty</th>
-              <th className="px-3 py-2 font-medium">Status</th>
+              <th className="px-3 py-2 font-medium">Reference</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={8} className="px-3 py-6 text-center text-neutral-400">
+                <td colSpan={6} className="px-3 py-6 text-center text-neutral-400">
                   Loading…
                 </td>
               </tr>
             ) : pagedRows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-3 py-6 text-center text-neutral-400">
-                  No records found.
+                <td colSpan={6} className="px-3 py-6 text-center text-neutral-400">
+                  No transactions found.
                 </td>
               </tr>
             ) : (
-              pagedRows.map((r, i) => (
-                <tr key={i} className="border-b border-neutral-200 last:border-0">
-                  <td className="px-3 py-2 text-neutral-600">{r.location_name}</td>
-                  <td className="px-3 py-2">{r.product_name}</td>
-                  <td className="px-3 py-2 text-neutral-500">{r.series || "—"}</td>
-                  <td className="px-3 py-2 text-neutral-500">{r.storage_size || "—"}</td>
-                  <td className="px-3 py-2 text-neutral-500">{r.color || "—"}</td>
-                  <td className="px-3 py-2 text-neutral-500">{r.ram || "—"}</td>
-                  <td className="px-3 py-2 font-mono text-xs">
-                    {r.control_serial ?? (r.non_control_amount !== null ? `Qty: ${r.non_control_amount}` : "—")}
+              pagedRows.map((r) => (
+                <tr key={r.id} className="border-b border-neutral-200 last:border-0">
+                  <td className="px-3 py-2 text-neutral-600 whitespace-nowrap">
+                    {formatDateTime(r.created_at)}
                   </td>
                   <td className="px-3 py-2">
-                    <span className={STATUS_STYLES[r.status] ?? ""}>{r.status}</span>
+                    <span className={TYPE_STYLES[r.trade_type] ?? ""}>
+                      {TYPE_LABELS[r.trade_type] ?? r.trade_type}
+                    </span>
                   </td>
+                  <td className="px-3 py-2">{r.product_name ?? "—"}</td>
+                  <td className="px-3 py-2 text-neutral-600">{r.location_name ?? "—"}</td>
+                  <td className="px-3 py-2 font-mono text-xs">
+                    {r.serial_number ?? `Qty: ${r.quantity}`}
+                  </td>
+                  <td className="px-3 py-2 text-neutral-500">{r.ref_doc_number ?? "—"}</td>
                 </tr>
               ))
             )}

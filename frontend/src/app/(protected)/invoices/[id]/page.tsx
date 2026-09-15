@@ -31,7 +31,12 @@ const STATUS_STYLES: Record<string, string> = {
   cancelled: "text-red-700",
 };
 
-const STATUS_OPTIONS = ["pending", "receiving", "completed", "cancelled"];
+const STATUS_OPTIONS = [
+  { value: 0, label: "pending" },
+  { value: 1, label: "receiving" },
+  { value: 2, label: "completed" },
+  { value: 3, label: "cancelled" },
+];
 
 type EditItemRow = {
   id?: number;
@@ -54,7 +59,7 @@ export default function InvoiceDetailPage() {
   const [showEditForm, setShowEditForm] = useState(false);
   const [editInvoiceNo, setEditInvoiceNo] = useState("");
   const [editLocationId, setEditLocationId] = useState<number | "">("");
-  const [editStatus, setEditStatus] = useState("");
+  // const [editStatus, setEditStatus] = useState("");
   const [editItems, setEditItems] = useState<EditItemRow[]>([{ ...emptyEditRow }]);
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -79,7 +84,7 @@ export default function InvoiceDetailPage() {
     if (!invoice) return;
     setEditInvoiceNo(invoice.invoice_no);
     setEditLocationId(invoice.location_id ?? "");
-    setEditStatus(invoice.status);
+    // setEditStatus(String(invoice.status));
     setEditItems(
       invoice.items.map((item) => ({
         id: item.id,
@@ -146,7 +151,7 @@ export default function InvoiceDetailPage() {
       await api.put(`/invoices/${invoice.id}`, {
         invoice_no: editInvoiceNo,
         location_id: editLocationId,
-        status: editStatus,
+        // status: Number(editStatus),
         items: editItems.map((row) => ({
           id: row.id,
           product_id: row.product_id,
@@ -175,7 +180,7 @@ export default function InvoiceDetailPage() {
     );
   }
 
-  const isOpen = invoice.status === "pending" || invoice.status === "receiving";
+  const isOpen = invoice.status === 0 || invoice.status === 1; // pending | receiving
 
   return (
     <div>
@@ -202,7 +207,7 @@ export default function InvoiceDetailPage() {
 
                 <form onSubmit={handleEditInvoice} className="overflow-y-auto pr-1 -mr-1">
                   <FieldGroup>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <Field>
                         <FieldLabel htmlFor="edit-invoice-no">Invoice No.</FieldLabel>
                         <Input
@@ -231,21 +236,6 @@ export default function InvoiceDetailPage() {
                             </option>
                           ))}
                         </select>
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="edit-invoice-status">Status</FieldLabel>
-                        <Select value={editStatus} onValueChange={setEditStatus}>
-                          <SelectTrigger id="edit-invoice-status">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {STATUS_OPTIONS.map((status) => (
-                              <SelectItem key={status} value={status} className="capitalize">
-                                {status}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
                       </Field>
                     </div>
 
@@ -343,8 +333,8 @@ export default function InvoiceDetailPage() {
           </p>
         </div>
         <div className="text-right">
-          <span className={`text-sm font-medium ${STATUS_STYLES[invoice.status] ?? ""}`}>
-            {invoice.status}
+          <span className={`text-sm font-medium ${STATUS_STYLES[invoice.status_label ?? ""] ?? ""}`}>
+            {invoice.status_label}
           </span>
           {isOpen && (
             <div className="mt-2">

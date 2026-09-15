@@ -65,12 +65,21 @@ export interface InvoiceItem {
   received_qty: number;
 }
 
+// Invoice status codes — must match config table (category='invoice') on the backend.
+export const INVOICE_STATUS = {
+  PENDING: 0,
+  RECEIVING: 1,
+  COMPLETED: 2,
+  CANCELLED: 3,
+} as const;
+
 export interface Invoice {
   id: number;
   invoice_no: string;
   location_id: number;
   location_name: string | null;
-  status: "pending" | "receiving" | "completed" | "cancelled";
+  status: number; // see INVOICE_STATUS
+  status_label: string | null; // human-readable, resolved by the backend
   invoice_date: string;
   created_by: number | null;
   items: InvoiceItem[];
@@ -90,7 +99,7 @@ export interface NewInvoice {
 
 export interface ReceiveResult {
   invoice_id: number;
-  invoice_status: string;
+  invoice_status: number; // see INVOICE_STATUS
   product_id: string;
   item_received_qty: number;
   item_quantity: number;
@@ -161,4 +170,22 @@ export interface StockTrackingRow {
   control_serial: string | null;
   non_control_amount: number | null;
   status: string;
+}
+
+export interface StockTransactionRow {
+  id: number;
+  trade_type: "RCV" | "ISS";
+  trade_code: number;
+  product_id: string;
+  product_name: string | null;
+  location_id: number;
+  location_name: string | null;
+  serial_number: string | null;
+  quantity: number;
+  ref_type: string | null;
+  ref_id: number | null;
+  ref_doc_number: string | null;
+  direction: string | null;
+  created_by: number | null;
+  created_at: string; // ISO timestamp
 }
