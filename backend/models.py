@@ -61,7 +61,7 @@ class Invoice(Base):
     id = Column(Integer, primary_key=True)
     invoice_no = Column(String(50), unique=True, nullable=False)
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
-    status = Column(String(20), nullable=False, default="pending")
+    status = Column(Integer, nullable=False, default=0)  # see config: category='invoice'
     invoice_date = Column(Date, nullable=False, server_default=func.current_date())
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -117,9 +117,8 @@ class Issue(Base):
     id = Column(Integer, primary_key=True)
     issue_no = Column(String(50), unique=True, nullable=False)
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
-    to_location_id = Column(Integer, ForeignKey("locations.id"))  # destination, only for trade_code '01'
-    reason_type = Column(String(20), nullable=False)  # 'trade_code' | 'trade_description'
-    trade_code = Column(String(2), nullable=False)
+    to_location_id = Column(Integer, ForeignKey("locations.id"))  # destination, only for trade_code 1 (transfer)
+    trade_code = Column(Integer, nullable=False)  # see config: category='issue'
     remark = Column(Text)
     issue_date = Column(Date, nullable=False, server_default=func.current_date())
     created_by = Column(Integer, ForeignKey("users.id"))
@@ -150,7 +149,7 @@ class StockTransaction(Base):
 
     id = Column(Integer, primary_key=True)
     trade_type = Column(String(3), nullable=False)  # 'RCV' | 'ISS'
-    trade_code = Column(String(2), nullable=False)
+    trade_code = Column(Integer, nullable=False)
     product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
     serial_number = Column(String(100))
@@ -167,7 +166,7 @@ class Config(Base):
 
     id = Column(Integer, primary_key=True)
     category = Column(String(50), nullable=False)
-    key = Column(String(20), nullable=False)
+    key = Column(Integer, nullable=False)
     value = Column(String(100), nullable=False)
     description = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

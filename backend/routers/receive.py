@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 import models, schemas, auth, status_codes
+from config_utils import get_config_labels
 
 router = APIRouter(prefix="/receive", tags=["receive"])
 
@@ -13,8 +14,12 @@ def _get_open_invoice(db: Session, invoice_id: int) -> models.Invoice:
     invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    if invoice.status in ("completed", "cancelled"):
-        raise HTTPException(status_code=400, detail=f"Invoice is already {invoice.status}, cannot receive against it")
+    if invoice.status in (2, 3):  # completed, cancelled
+        labels = get_config_labels(db, "invoice")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invoice is already {labels.get(invoice.status, invoice.status)}, cannot receive against it",
+        )
     return invoice
 
 
@@ -37,10 +42,10 @@ def _refresh_invoice_status(db: Session, invoice: models.Invoice) -> None:
     any_done = any(i.received_qty > 0 for i in items)
 
     if all_done:
-        invoice.status = "completed"
+        invoice.status = 2  # completed
     elif any_done:
-        invoice.status = "receiving"
-    # else stays 'pending'
+        invoice.status = 1  # receiving
+    # else stays 0 (pending)
 
 
 @router.post("/{invoice_id}/scan-serial", response_model=schemas.ReceiveResultOut)
@@ -81,7 +86,7 @@ def receive_by_serial(
     db.add(
         models.StockTransaction(
             trade_type="RCV",
-            trade_code="00",  # purchase / invoice
+            trade_code=0,  # purchase / invoice
             product_id=payload.product_id,
             location_id=invoice.location_id,
             serial_number=payload.serial_number,
@@ -145,7 +150,7 @@ def receive_by_quantity(
     db.add(
         models.StockTransaction(
             trade_type="RCV",
-            trade_code="00",
+            trade_code=0,
             product_id=payload.product_id,
             location_id=invoice.location_id,
             serial_number=None,

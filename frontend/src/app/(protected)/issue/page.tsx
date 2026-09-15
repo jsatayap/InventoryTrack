@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, FormEvent, Fragment } from "react";
-import { api, buildQuery, ApiError } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { Location, Product, Issue, NewIssueItem } from "@/lib/types";
 import {
   Dialog,
@@ -20,8 +20,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
-import { X } from "lucide-react";
+import { X, ChevronDown} from "lucide-react";
 
 const TRADE_CODES = [
   { code: "01", label: "Transfer" },
@@ -54,8 +60,7 @@ export default function IssuePage() {
   const [isLoadingIssues, setIsLoadingIssues] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
-
-  const [filterLocation, setFilterLocation] = useState<number | "">("");
+  const [selectedLocationIds, setSelectedLocationIds] = useState<number[]>([]);
 
   // form state
   const [showAddForm, setShowAddForm] = useState(false);
@@ -83,8 +88,7 @@ export default function IssuePage() {
     setIsLoadingIssues(true);
     setListError(null);
     try {
-      const query = buildQuery({ location_id: filterLocation || undefined });
-      const data = await api.get<Issue[]>(`/issues${query}`);
+      const data = await api.get<Issue[]>("/issues");
       setIssues(data);
     } catch (err) {
       setListError(err instanceof ApiError ? err.message : "Could not load issue history.");
@@ -92,6 +96,21 @@ export default function IssuePage() {
       setIsLoadingIssues(false);
     }
   }
+
+  function toggleLocationFilter(id: number) {
+    setSelectedLocationIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
+
+  function clearLocationFilter() {
+    setSelectedLocationIds([]);
+  }
+
+  const filteredIssues =
+    selectedLocationIds.length === 0
+      ? issues
+      : issues.filter((iss) => selectedLocationIds.includes(iss.location_id));
 
   function productById(id: string) {
     return products.find((p) => p.id === id);
@@ -490,25 +509,38 @@ export default function IssuePage() {
         </Dialog>
       </div>
 
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-medium text-neutral-700">Issue history</h2>
-        <div className="flex items-center gap-2">
-          <select
-            value={filterLocation}
-            onChange={(e) => setFilterLocation(e.target.value ? Number(e.target.value) : "")}
-            className="input w-auto"
-          >
-            <option value="">All locations</option>
+      <div className="border border-neutral-300 bg-white p-4 mb-4 flex flex-wrap gap-3 items-center">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="outline" className="justify-between min-w-[160px]">
+                <span>
+                  Location
+                  {selectedLocationIds.length > 0 ? ` (${selectedLocationIds.length})` : ""}
+                </span>
+                <ChevronDown className="size-4 opacity-50" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="start">
             {locations.map((loc) => (
-              <option key={loc.id} value={loc.id}>
+              <DropdownMenuCheckboxItem
+                key={loc.id}
+                checked={selectedLocationIds.includes(loc.id)}
+                onCheckedChange={() => toggleLocationFilter(loc.id)}
+                onSelect={(e) => e.preventDefault()}
+              >
                 {loc.name}
-              </option>
+              </DropdownMenuCheckboxItem>
             ))}
-          </select>
-          <Button onClick={fetchIssues} variant="secondary">
-            Filter
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {selectedLocationIds.length > 0 && (
+          <Button variant="ghost" onClick={clearLocationFilter}>
+            Clear filters
           </Button>
-        </div>
+        )}
       </div>
 
       {listError && (
@@ -533,14 +565,16 @@ export default function IssuePage() {
                   Loading…
                 </td>
               </tr>
-            ) : issues.length === 0 ? (
+            ) : filteredIssues.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-3 py-6 text-center text-neutral-400">
-                  No issues yet.
+                  {selectedLocationIds.length > 0
+                    ? "No issues match the selected locations."
+                    : "No issues yet."}
                 </td>
               </tr>
             ) : (
-              issues.map((iss) => {
+              filteredIssues.map((iss) => {
                 const label = TRADE_CODES.find((t) => t.code === iss.trade_code)?.label ?? iss.trade_code;
                 const isExpanded = expandedId === iss.id;
                 return (

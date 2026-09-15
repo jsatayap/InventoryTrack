@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, FormEvent } from "react";
-import { api, buildQuery, ApiError } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { api, ApiError } from "@/lib/api";
 import { Location, StockTrackingRow } from "@/lib/types";
 import { Field, FieldLabel } from "@/components/ui/field";
-
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import {
   Pagination,
   PaginationContent,
@@ -19,12 +20,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ChevronDown } from "lucide-react";
 
 const STATUS_STYLES: Record<string, string> = {
   in_stock: "text-green-700",
   issued: "text-amber-700",
-  transferred: "text-blue-700",
   wasted: "text-red-700",
+};
+
+const STATUS_OPTIONS = ["in_stock", "issued", "wasted"];
+const STATUS_LABELS: Record<string, string> = {
+  in_stock: "In stock",
+  issued: "Issued",
+  wasted: "Wasted",
 };
 
 export default function StockTrackingPage() {
@@ -33,9 +47,9 @@ export default function StockTrackingPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [locationId, setLocationId] = useState<number | "">("");
+  const [selectedLocationIds, setSelectedLocationIds] = useState<number[]>([]);
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
   const [productName, setProductName] = useState("");
-  const [status, setStatus] = useState("");
 
   const [pageSize, setPageSize] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
@@ -50,12 +64,7 @@ export default function StockTrackingPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const query = buildQuery({
-        location_id: locationId || undefined,
-        product_name: productName,
-        status: status || undefined,
-      });
-      const data = await api.get<StockTrackingRow[]>(`/stock/tracking${query}`);
+      const data = await api.get<StockTrackingRow[]>("/stock/tracking");
       setRows(data);
       setCurrentPage(1);
     } catch (err) {
@@ -65,64 +74,126 @@ export default function StockTrackingPage() {
     }
   }
 
-  function handleSearch(e: FormEvent) {
-    e.preventDefault();
-    fetchTracking();
+  function toggleLocationFilter(id: number) {
+    setSelectedLocationIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+    setCurrentPage(1);
   }
 
-  
-  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  function toggleStatusFilter(s: string) {
+    setSelectedStatuses((prev) =>
+      prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]
+    );
+    setCurrentPage(1);
+  }
+
+  function clearFilters() {
+    setSelectedLocationIds([]);
+    setSelectedStatuses([]);
+    setProductName("");
+    setCurrentPage(1);
+  }
+
+  const selectedLocationNames = locations
+    .filter((l) => selectedLocationIds.includes(l.id))
+    .map((l) => l.name);
+
+  const filteredRows = rows.filter((r) => {
+    const locationMatch =
+      selectedLocationNames.length === 0 || selectedLocationNames.includes(r.location_name);
+    const statusMatch = selectedStatuses.length === 0 || selectedStatuses.includes(r.status);
+    const nameMatch =
+      productName.trim() === "" ||
+      r.product_name.toLowerCase().includes(productName.trim().toLowerCase());
+    return locationMatch && statusMatch && nameMatch;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const pageStart = (currentPage - 1) * pageSize;
-  const pagedRows = rows.slice(pageStart, pageStart + pageSize);
+  const pagedRows = filteredRows.slice(pageStart, pageStart + pageSize);
 
   function handlePageSizeChange(value: string) {
     setPageSize(Number(value));
     setCurrentPage(1);
   }
+
+  const hasFilters =
+    selectedLocationIds.length > 0 || selectedStatuses.length > 0 || productName.trim() !== "";
+
   return (
     <div>
       <h1 className="text-xl font-semibold text-neutral-900 mb-6">Stock Tracking</h1>
 
-      <form
-        onSubmit={handleSearch}
-        className="border border-neutral-300 bg-white p-4 mb-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end"
-      >
-        <label className="block">
-          <span className="block text-xs text-neutral-500 mb-1">Location</span>
-          <select
-            value={locationId}
-            onChange={(e) => setLocationId(e.target.value ? Number(e.target.value) : "")}
-            className="input"
-          >
-            <option value="">All locations</option>
+      <div className="border border-neutral-300 bg-white p-4 mb-4 flex flex-wrap gap-3 items-center">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="outline" className="justify-between min-w-[160px]">
+                <span>
+                  Location
+                  {selectedLocationIds.length > 0 ? ` (${selectedLocationIds.length})` : ""}
+                </span>
+                <ChevronDown className="size-4 opacity-50" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="start">
             {locations.map((loc) => (
-              <option key={loc.id} value={loc.id}>
+              <DropdownMenuCheckboxItem
+                key={loc.id}
+                checked={selectedLocationIds.includes(loc.id)}
+                onCheckedChange={() => toggleLocationFilter(loc.id)}
+                onSelect={(e) => e.preventDefault()}
+              >
                 {loc.name}
-              </option>
+              </DropdownMenuCheckboxItem>
             ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="block text-xs text-neutral-500 mb-1">Product name</span>
-          <input value={productName} onChange={(e) => setProductName(e.target.value)} className="input" />
-        </label>
-        <label className="block">
-          <span className="block text-xs text-neutral-500 mb-1">Status</span>
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className="input">
-            <option value="">All statuses</option>
-            <option value="in_stock">In stock</option>
-            <option value="issued">Issued</option>
-            <option value="transferred">Transferred</option>
-            <option value="wasted">Wasted</option>
-          </select>
-        </label>
-        <button
-          type="submit"
-          className="bg-neutral-900 text-white text-sm font-medium px-4 py-2 hover:bg-neutral-700 transition-colors"
-        >
-          Search
-        </button>
-      </form>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="outline" className="justify-between min-w-[160px]">
+                <span>
+                  Status
+                  {selectedStatuses.length > 0 ? ` (${selectedStatuses.length})` : ""}
+                </span>
+                <ChevronDown className="size-4 opacity-50" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="start">
+            {STATUS_OPTIONS.map((s) => (
+              <DropdownMenuCheckboxItem
+                key={s}
+                checked={selectedStatuses.includes(s)}
+                onCheckedChange={() => toggleStatusFilter(s)}
+                onSelect={(e) => e.preventDefault()}
+              >
+                {STATUS_LABELS[s]}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <Input
+          placeholder="Search product name…"
+          value={productName}
+          onChange={(e) => {
+            setProductName(e.target.value);
+            setCurrentPage(1);
+          }}
+          className="w-[220px]"
+        />
+
+        {hasFilters && (
+          <Button variant="ghost" onClick={clearFilters}>
+            Clear filters
+          </Button>
+        )}
+      </div>
 
       {error && (
         <p className="text-sm text-red-700 bg-red-50 border border-red-200 px-3 py-2 mb-4">{error}</p>
@@ -177,7 +248,6 @@ export default function StockTrackingPage() {
         </table>
       </div>
 
-      
       <div className="flex items-center justify-between mt-4">
         <Field orientation="horizontal" className="items-center gap-2 w-auto">
           <FieldLabel htmlFor="page-size" className="font-normal text-neutral-500">

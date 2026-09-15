@@ -7,13 +7,30 @@ import models, schemas, auth
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
 
-def _to_invoice_out(invoice: models.Invoice) -> schemas.InvoiceOut:
+def _invoice_base_query(db: Session):
+    """Invoice query joined to config so status_label comes back in the same
+    round trip, instead of a second lookup query per request."""
+    return (
+        db.query(models.Invoice, models.Config.value)
+        .outerjoin(
+            models.Config,
+            (models.Config.category == "invoice") & (models.Config.key == models.Invoice.status),
+        )
+        .options(
+            joinedload(models.Invoice.items).joinedload(models.InvoiceItem.product),
+            joinedload(models.Invoice.location),
+        )
+    )
+
+
+def _to_invoice_out(invoice: models.Invoice, status_label: str | None) -> schemas.InvoiceOut:
     return schemas.InvoiceOut(
         id=invoice.id,
         invoice_no=invoice.invoice_no,
         location_id=invoice.location_id,
         location_name=invoice.location.name if invoice.location else None,
         status=invoice.status,
+        status_label=status_label,
         invoice_date=str(invoice.invoice_date),
         created_by=invoice.created_by,
         items=[
@@ -33,37 +50,27 @@ def _to_invoice_out(invoice: models.Invoice) -> schemas.InvoiceOut:
 @router.get("", response_model=list[schemas.InvoiceOut])
 def list_invoices(
     location_id: int | None = Query(None),
-    status: str | None = Query(None, description="pending, receiving, completed, cancelled"),
+    status: int | None = Query(None, description="0=pending, 1=receiving, 2=completed, 3=cancelled"),
     db: Session = Depends(get_db),
     current_user=Depends(auth.get_current_user),
 ):
-    query = db.query(models.Invoice).options(
-        joinedload(models.Invoice.items).joinedload(models.InvoiceItem.product),
-        joinedload(models.Invoice.location),
-    )
+    query = _invoice_base_query(db)
     if location_id:
         query = query.filter(models.Invoice.location_id == location_id)
     if status:
         query = query.filter(models.Invoice.status == status)
 
-    invoices = query.order_by(models.Invoice.created_at.desc()).all()
-    return [_to_invoice_out(inv) for inv in invoices]
+    rows = query.order_by(models.Invoice.created_at.desc()).all()
+    return [_to_invoice_out(inv, label) for inv, label in rows]
 
 
 @router.get("/{invoice_id}", response_model=schemas.InvoiceOut)
 def get_invoice(invoice_id: int, db: Session = Depends(get_db), current_user=Depends(auth.get_current_user)):
-    invoice = (
-        db.query(models.Invoice)
-        .options(
-            joinedload(models.Invoice.items).joinedload(models.InvoiceItem.product),
-            joinedload(models.Invoice.location),
-        )
-        .filter(models.Invoice.id == invoice_id)
-        .first()
-    )
-    if not invoice:
+    row = _invoice_base_query(db).filter(models.Invoice.id == invoice_id).first()
+    if not row:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    return _to_invoice_out(invoice)
+    invoice, label = row
+    return _to_invoice_out(invoice, label)
 
 
 @router.post("", response_model=schemas.InvoiceOut, status_code=201)
@@ -91,7 +98,7 @@ def create_invoice(
     invoice = models.Invoice(
         invoice_no=payload.invoice_no,
         location_id=payload.location_id,
-        status="pending",
+        status=0,  # pending — see config: category='invoice'
         created_by=current_user.id,
     )
     if payload.invoice_date:
@@ -113,20 +120,13 @@ def create_invoice(
     db.commit()
     db.refresh(invoice)
 
-    # reload with relationships for the response
-    invoice = (
-        db.query(models.Invoice)
-        .options(
-            joinedload(models.Invoice.items).joinedload(models.InvoiceItem.product),
-            joinedload(models.Invoice.location),
-        )
-        .filter(models.Invoice.id == invoice.id)
-        .first()
-    )
-    return _to_invoice_out(invoice)
+    # reload with relationships (and status label) for the response
+    row = _invoice_base_query(db).filter(models.Invoice.id == invoice.id).first()
+    invoice, label = row
+    return _to_invoice_out(invoice, label)
 
 
-VALID_STATUSES = {"pending", "receiving", "completed", "cancelled"}
+VALID_STATUSES = {0, 1, 2, 3}  # pending, receiving, completed, cancelled — see config: category='invoice'
 
 
 @router.put("/{invoice_id}", response_model=schemas.InvoiceOut)
@@ -215,13 +215,6 @@ def update_invoice(
     db.commit()
     db.refresh(invoice)
 
-    invoice = (
-        db.query(models.Invoice)
-        .options(
-            joinedload(models.Invoice.items).joinedload(models.InvoiceItem.product),
-            joinedload(models.Invoice.location),
-        )
-        .filter(models.Invoice.id == invoice.id)
-        .first()
-    )
-    return _to_invoice_out(invoice)
+    row = _invoice_base_query(db).filter(models.Invoice.id == invoice.id).first()
+    invoice, label = row
+    return _to_invoice_out(invoice, label)

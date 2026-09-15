@@ -143,7 +143,7 @@ class InvoiceItemUpdate(BaseModel):
 class InvoiceUpdate(BaseModel):
     invoice_no: str | None = None
     location_id: int | None = None
-    status: str | None = None
+    status: int | None = None  # see config: category='invoice'
     items: list[InvoiceItemUpdate] | None = None
 
 class InvoiceOut(BaseModel):
@@ -151,7 +151,8 @@ class InvoiceOut(BaseModel):
     invoice_no: str
     location_id: int
     location_name: str | None = None
-    status: str
+    status: int  # see config: category='invoice'
+    status_label: str | None = None  # e.g. "pending" — resolved from config
     invoice_date: str
     created_by: int | None = None
     items: list[InvoiceItemOut] = []
@@ -174,7 +175,7 @@ class ReceiveQuantityRequest(BaseModel):
 
 class ReceiveResultOut(BaseModel):
     invoice_id: int
-    invoice_status: str
+    invoice_status: int  # see config: category='invoice'
     product_id: uuid.UUID
     item_received_qty: int
     item_quantity: int
@@ -204,9 +205,8 @@ class IssueItemOut(BaseModel):
 class IssueCreate(BaseModel):
     issue_no: str
     location_id: int
-    to_location_id: int | None = None  # required when trade_code == '01' (transfer)
-    reason_type: str  # 'trade_code' | 'trade_description'
-    trade_code: str   # '01' transfer, '55' adjust, '99' wasted
+    to_location_id: int | None = None  # required when trade_code == 1 (transfer)
+    trade_code: int   # 1 transfer, 55 adjust, 99 wasted; see config: category='issue'
     remark: str | None = None
     items: list[IssueItemCreate]
 
@@ -218,8 +218,8 @@ class IssueOut(BaseModel):
     location_name: str | None = None
     to_location_id: int | None = None
     to_location_name: str | None = None
-    reason_type: str
-    trade_code: str
+    trade_code: int
+    trade_code_label: str | None = None  # e.g. "transfer" — resolved from config
     remark: str | None = None
     issue_date: str
     created_by: int | None = None

@@ -6,17 +6,17 @@ import models, schemas, auth, status_codes
 
 router = APIRouter(prefix="/issues", tags=["issues"])
 
-VALID_ISS_TRADE_CODES = {"01", "55", "99"}  # transfer, adjust, wasted
+VALID_ISS_TRADE_CODES = {1, 55, 99}  # transfer, adjust, wasted
 
 # For non-transfer codes, the unit leaves inventory entirely and gets a terminal status.
-# '01' (transfer) is handled separately below since the unit moves rather than terminates.
+# 1 (transfer) is handled separately below since the unit moves rather than terminates.
 TERMINAL_STATUS_BY_TRADE_CODE = {
-    "55": status_codes.PRODUCT_UNIT_ISSUED,
-    "99": status_codes.PRODUCT_UNIT_WASTED,
+    55: status_codes.PRODUCT_UNIT_ISSUED,
+    99: status_codes.PRODUCT_UNIT_WASTED,
 }
 
 
-def _to_issue_out(issue: models.Issue) -> schemas.IssueOut:
+def _to_issue_out(issue: models.Issue, trade_code_label: str | None) -> schemas.IssueOut:
     return schemas.IssueOut(
         id=issue.id,
         issue_no=issue.issue_no,
@@ -24,8 +24,8 @@ def _to_issue_out(issue: models.Issue) -> schemas.IssueOut:
         location_name=issue.location.name if issue.location else None,
         to_location_id=issue.to_location_id,
         to_location_name=issue.to_location.name if issue.to_location else None,
-        reason_type=issue.reason_type,
         trade_code=issue.trade_code,
+        trade_code_label=trade_code_label,
         remark=issue.remark,
         issue_date=str(issue.issue_date),
         created_by=issue.created_by,
@@ -44,11 +44,20 @@ def _to_issue_out(issue: models.Issue) -> schemas.IssueOut:
 
 
 def _issue_query(db: Session):
-    return db.query(models.Issue).options(
-        joinedload(models.Issue.items).joinedload(models.IssueItem.product),
-        joinedload(models.Issue.items).joinedload(models.IssueItem.product_unit),
-        joinedload(models.Issue.location),
-        joinedload(models.Issue.to_location),
+    """Issue query joined to config so trade_code_label comes back in the
+    same round trip, instead of a second lookup query per request."""
+    return (
+        db.query(models.Issue, models.Config.value)
+        .outerjoin(
+            models.Config,
+            (models.Config.category == "issue") & (models.Config.key == models.Issue.trade_code),
+        )
+        .options(
+            joinedload(models.Issue.items).joinedload(models.IssueItem.product),
+            joinedload(models.Issue.items).joinedload(models.IssueItem.product_unit),
+            joinedload(models.Issue.location),
+            joinedload(models.Issue.to_location),
+        )
     )
 
 
@@ -65,16 +74,17 @@ def list_issues(
     if trade_code:
         query = query.filter(models.Issue.trade_code == trade_code)
 
-    issues = query.order_by(models.Issue.created_at.desc()).all()
-    return [_to_issue_out(i) for i in issues]
+    rows = query.order_by(models.Issue.created_at.desc()).all()
+    return [_to_issue_out(i, label) for i, label in rows]
 
 
 @router.get("/{issue_id}", response_model=schemas.IssueOut)
 def get_issue(issue_id: int, db: Session = Depends(get_db), current_user=Depends(auth.get_current_user)):
-    issue = _issue_query(db).filter(models.Issue.id == issue_id).first()
-    if not issue:
+    row = _issue_query(db).filter(models.Issue.id == issue_id).first()
+    if not row:
         raise HTTPException(status_code=404, detail="Issue not found")
-    return _to_issue_out(issue)
+    issue, label = row
+    return _to_issue_out(issue, label)
 
 
 @router.post("", response_model=schemas.IssueOut, status_code=201)
@@ -85,21 +95,19 @@ def create_issue(
 ):
     if payload.trade_code not in VALID_ISS_TRADE_CODES:
         raise HTTPException(status_code=400, detail=f"trade_code must be one of {sorted(VALID_ISS_TRADE_CODES)}")
-    if payload.reason_type not in ("trade_code", "trade_description"):
-        raise HTTPException(status_code=400, detail="reason_type must be 'trade_code' or 'trade_description'")
 
-    is_transfer = payload.trade_code == "01"
+    is_transfer = payload.trade_code == 1
 
     if is_transfer:
         if not payload.to_location_id:
-            raise HTTPException(status_code=400, detail="to_location_id is required for a transfer (trade_code '01')")
+            raise HTTPException(status_code=400, detail="to_location_id is required for a transfer (trade_code 1)")
         if payload.to_location_id == payload.location_id:
             raise HTTPException(status_code=400, detail="Destination location must be different from the source location")
         to_location = db.query(models.Location).filter(models.Location.id == payload.to_location_id).first()
         if not to_location:
             raise HTTPException(status_code=404, detail="Destination location not found")
     elif payload.to_location_id:
-        raise HTTPException(status_code=400, detail="to_location_id is only used with trade_code '01' (transfer)")
+        raise HTTPException(status_code=400, detail="to_location_id is only used with trade_code 1 (transfer)")
 
     existing = db.query(models.Issue).filter(models.Issue.issue_no == payload.issue_no).first()
     if existing:
@@ -168,7 +176,6 @@ def create_issue(
         issue_no=payload.issue_no,
         location_id=payload.location_id,
         to_location_id=payload.to_location_id if is_transfer else None,
-        reason_type=payload.reason_type,
         trade_code=payload.trade_code,
         remark=payload.remark,
         created_by=current_user.id,
@@ -209,7 +216,7 @@ def create_issue(
                 db.add(
                     models.StockTransaction(
                         trade_type="RCV",
-                        trade_code="01",
+                        trade_code=1,
                         product_id=product.id,
                         location_id=payload.to_location_id,
                         serial_number=unit.serial_number,
@@ -268,7 +275,7 @@ def create_issue(
                 db.add(
                     models.StockTransaction(
                         trade_type="RCV",
-                        trade_code="01",
+                        trade_code=1,
                         product_id=product.id,
                         location_id=payload.to_location_id,
                         serial_number=None,
@@ -281,5 +288,6 @@ def create_issue(
 
     db.commit()
 
-    issue = _issue_query(db).filter(models.Issue.id == issue.id).first()
-    return _to_issue_out(issue)
+    row = _issue_query(db).filter(models.Issue.id == issue.id).first()
+    issue, label = row
+    return _to_issue_out(issue, label)

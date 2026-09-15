@@ -39,7 +39,7 @@ def get_current_stock(
 def get_stock_tracking(
     location_id: int | None = Query(None),
     product_name: str | None = Query(None, description="Partial match on product name"),
-    status: str | None = Query(None, description="in_stock, issued, transferred, wasted"),
+    status: str | None = Query(None, description="in_stock, issued, wasted"),
     db: Session = Depends(get_db),
     current_user=Depends(auth.get_current_user),
 ):

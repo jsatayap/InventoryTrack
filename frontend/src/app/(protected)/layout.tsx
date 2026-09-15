@@ -4,6 +4,15 @@ import { ReactNode, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import {
+  NavigationMenu,
+  NavigationMenuContent,
+  NavigationMenuItem,
+  NavigationMenuLink,
+  NavigationMenuList,
+  NavigationMenuTrigger,
+  navigationMenuTriggerStyle,
+} from "@/components/ui/navigation-menu"
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard" },
@@ -45,24 +54,66 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
         <div className="max-w-6xl mx-auto px-4 flex items-center justify-between h-14">
           <div className="flex items-center gap-8">
             <span className="font-semibold text-neutral-900">InventoryTrack</span>
-            <nav className="flex gap-1">
-              {NAV_ITEMS.map((item) => {
-                const isActive = pathname === item.href;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`px-3 py-1.5 text-sm transition-colors ${
-                      isActive
-                        ? "bg-[#1E3A5F] text-white"
-                        : "text-neutral-600 hover:bg-neutral-100"
-                    }`}
-                  >
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </nav>
+            <NavigationMenu>
+              <NavigationMenuList>
+                <NavigationMenuItem>
+                  <NavigationMenuLink
+                    render={<Link href="/" />}
+                    className={navigationMenuTriggerStyle()}
+                    >
+                      Dashboard
+                    </NavigationMenuLink>
+                </NavigationMenuItem>
+                <NavigationMenuItem>
+                  <NavigationMenuLink
+                    render={<Link href="/products" />}
+                    className={navigationMenuTriggerStyle()}
+                    >
+                      Products
+                    </NavigationMenuLink>
+                </NavigationMenuItem>
+                <NavigationMenuItem>
+                  <NavigationMenuLink
+                    render={<Link href="/locations" />}
+                    className={navigationMenuTriggerStyle()}
+                    >
+                      Locations
+                    </NavigationMenuLink>
+                </NavigationMenuItem>
+                <NavigationMenuItem>
+                  <NavigationMenuLink
+                    render={<Link href="/invoices" />}
+                    className={navigationMenuTriggerStyle()}
+                    >
+                      Invoices
+                    </NavigationMenuLink>
+                </NavigationMenuItem>
+                <NavigationMenuItem>
+                  <NavigationMenuLink
+                    render={<Link href="/issue" />}
+                    className={navigationMenuTriggerStyle()}
+                    >
+                      Issue
+                    </NavigationMenuLink>
+                </NavigationMenuItem>
+                <NavigationMenuItem>
+                  <NavigationMenuLink
+                    render={<Link href="/stock" />}
+                    className={navigationMenuTriggerStyle()}
+                    >
+                      Current Stock
+                    </NavigationMenuLink>
+                </NavigationMenuItem>
+                <NavigationMenuItem>
+                  <NavigationMenuLink
+                    render={<Link href="/stock-tracking" />}
+                    className={navigationMenuTriggerStyle()}
+                    >
+                      Stock Tracking
+                    </NavigationMenuLink>
+                </NavigationMenuItem>
+              </NavigationMenuList>
+            </NavigationMenu>
           </div>
 
           <div className="flex items-center gap-4">
