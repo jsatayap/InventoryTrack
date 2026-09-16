@@ -277,3 +277,8 @@ class StockTransactionOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+class MonthlyStockTrendOut(BaseModel):
+    month: str        # "2026-01"
+    received: int
+    issued: int

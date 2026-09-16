@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import text
+from sqlalchemy import text, func, case
 from sqlalchemy.orm import Session
-
+from dateutil.relativedelta import relativedelta
+from datetime import date
 from database import get_db
-import schemas, auth
+import schemas, auth, models
 
 router = APIRouter(prefix="/stock", tags=["stock"])
 
@@ -94,3 +95,31 @@ def get_stock_transactions(
         {"location_id": location_id, "product_name": product_name, "trade_type": trade_type},
     ).mappings().all()
     return [schemas.StockTransactionOut(**row) for row in rows]
+
+
+@router.get("/dashboard/monthly-trend", response_model=list[schemas.MonthlyStockTrendOut])
+def get_monthly_trend(months: int = 6, db: Session = Depends(get_db)):
+    cutoff = date.today().replace(day=1) - relativedelta(months=months - 1)
+    month_expr = func.to_char(models.StockTransaction.created_at, "YYYY-MM")
+
+    rows = (
+        db.query(
+            month_expr.label("month"),
+            func.sum(
+                case((models.StockTransaction.trade_type == "RCV",
+                      models.StockTransaction.quantity), else_=0)
+            ).label("received"),
+            func.sum(
+                case((models.StockTransaction.trade_type == "ISS",
+                      models.StockTransaction.quantity), else_=0)
+            ).label("issued"),
+        )
+        .filter(models.StockTransaction.created_at >= cutoff)
+        .group_by(month_expr)
+        .order_by(month_expr)
+        .all()
+    )
+    return [
+        schemas.MonthlyStockTrendOut(month=r.month, received=r.received, issued=r.issued)
+        for r in rows
+    ]
