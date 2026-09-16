@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, Boolean, Numeric, Text, Date, DateTime,
-    ForeignKey, func
+    ForeignKey, func, UniqueConstraint, Computed
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
@@ -160,6 +160,53 @@ class StockTransaction(Base):
     direction = Column(String(3))
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class StockMonthlySummary(Base):
+    __tablename__ = "stock_monthly_summary"
+
+    id = Column(Integer, primary_key=True)
+
+    # Grain
+    month = Column(Date, nullable=False)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
+
+    # Denormalized descriptive fields
+    sku = Column(String(50))
+    product_name = Column(String(150))
+    series = Column(String(100))
+    is_serialized = Column(Boolean, nullable=False, default=True)
+    location_code = Column(String(20))
+    location_name = Column(String(100))
+
+    # Transaction measures
+    received_qty = Column(Integer, nullable=False, default=0)
+    issued_qty = Column(Integer, nullable=False, default=0)  # original total, kept for backward compat
+    opening_balance = Column(Integer, nullable=False, default=0)
+    issued_transfer_qty = Column(Integer, nullable=False, default=0)     # trade_code 1
+    issued_adjustment_qty = Column(Integer, nullable=False, default=0)   # trade_code 55
+    issued_wasted_qty = Column(Integer, nullable=False, default=0)       # trade_code 99
+    total_issued_qty = Column(Integer, nullable=False, default=0)
+    net_change_qty = Column(Integer, nullable=False, default=0)
+    closing_balance = Column(Integer, nullable=False, default=0)
+
+    # Value fields — generated columns, DB-computed, read-only in the ORM
+    avg_unit_price = Column(Numeric(12, 2))
+    received_value = Column(Numeric(14, 2), Computed("received_qty * COALESCE(avg_unit_price, 0)", persisted=True))
+    issued_value = Column(Numeric(14, 2), Computed("total_issued_qty * COALESCE(avg_unit_price, 0)", persisted=True))
+
+    # Traceability (approximate — see migration notes on invoice_count)
+    invoice_count = Column(Integer, nullable=False, default=0)
+    transaction_count = Column(Integer, nullable=False, default=0)
+
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("month", "product_id", "location_id", name="uq_monthly_summary_grain"),
+    )
+
+    product = relationship("Product")
+    location = relationship("Location")
 
 class Config(Base):
     __tablename__ = "config"

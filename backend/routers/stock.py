@@ -5,6 +5,7 @@ from dateutil.relativedelta import relativedelta
 from datetime import date
 from database import get_db
 import schemas, auth, models
+import uuid
 
 router = APIRouter(prefix="/stock", tags=["stock"])
 
@@ -98,28 +99,81 @@ def get_stock_transactions(
 
 
 @router.get("/dashboard/monthly-trend", response_model=list[schemas.MonthlyStockTrendOut])
-def get_monthly_trend(months: int = 6, db: Session = Depends(get_db)):
+def get_monthly_trend(
+    months: int = 6,
+    location_ids: str | None = None,
+    product_ids: str | None = None,
+    db: Session = Depends(get_db),
+):
     cutoff = date.today().replace(day=1) - relativedelta(months=months - 1)
-    month_expr = func.to_char(models.StockTransaction.created_at, "YYYY-MM")
+
+    query = db.query(
+        models.StockMonthlySummary.month,
+        func.sum(models.StockMonthlySummary.received_qty).label("received"),
+        func.sum(models.StockMonthlySummary.issued_qty).label("issued"),
+    ).filter(models.StockMonthlySummary.month >= cutoff)
+
+    if location_ids:
+        loc_list = [int(x) for x in location_ids.split(",") if x]
+        query = query.filter(models.StockMonthlySummary.location_id.in_(loc_list))
+
+    if product_ids:
+        prod_list = [uuid.UUID(x) for x in product_ids.split(",") if x]
+        query = query.filter(models.StockMonthlySummary.product_id.in_(prod_list))
 
     rows = (
-        db.query(
-            month_expr.label("month"),
-            func.sum(
-                case((models.StockTransaction.trade_type == "RCV",
-                      models.StockTransaction.quantity), else_=0)
-            ).label("received"),
-            func.sum(
-                case((models.StockTransaction.trade_type == "ISS",
-                      models.StockTransaction.quantity), else_=0)
-            ).label("issued"),
-        )
-        .filter(models.StockTransaction.created_at >= cutoff)
-        .group_by(month_expr)
-        .order_by(month_expr)
-        .all()
+        query.group_by(models.StockMonthlySummary.month)
+             .order_by(models.StockMonthlySummary.month)
+             .all()
     )
     return [
-        schemas.MonthlyStockTrendOut(month=r.month, received=r.received, issued=r.issued)
+        schemas.MonthlyStockTrendOut(month=r.month.strftime("%Y-%m"), received=r.received, issued=r.issued)
         for r in rows
     ]
+
+
+@router.get("/monthly-summary", response_model=list[schemas.StockMonthlySummaryOut])
+def get_monthly_summary(
+    month_from: date | None = Query(None, description="Inclusive, e.g. 2026-01-01"),
+    month_to: date | None = Query(None, description="Inclusive, e.g. 2026-09-01"),
+    location_ids: str | None = Query(None, description="Comma-separated location ids"),
+    product_ids: str | None = Query(None, description="Comma-separated product UUIDs"),
+    sku: str | None = Query(None, description="Partial match on SKU"),
+    product_name: str | None = Query(None, description="Partial match on product name"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user=Depends(auth.get_current_user),
+):
+    """Denormalized monthly rollup, one row per (month, product, location)."""
+    query = db.query(models.StockMonthlySummary)
+
+    if month_from:
+        query = query.filter(models.StockMonthlySummary.month >= month_from)
+    if month_to:
+        query = query.filter(models.StockMonthlySummary.month <= month_to)
+
+    if location_ids:
+        loc_list = [int(x) for x in location_ids.split(",") if x]
+        query = query.filter(models.StockMonthlySummary.location_id.in_(loc_list))
+
+    if product_ids:
+        prod_list = [uuid.UUID(x) for x in product_ids.split(",") if x]
+        query = query.filter(models.StockMonthlySummary.product_id.in_(prod_list))
+
+    if sku:
+        query = query.filter(models.StockMonthlySummary.sku.ilike(f"%{sku}%"))
+    if product_name:
+        query = query.filter(models.StockMonthlySummary.product_name.ilike(f"%{product_name}%"))
+
+    rows = (
+        query.order_by(
+            models.StockMonthlySummary.month.desc(),
+            models.StockMonthlySummary.location_name,
+            models.StockMonthlySummary.product_name,
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return [schemas.StockMonthlySummaryOut.model_validate(r) for r in rows]
