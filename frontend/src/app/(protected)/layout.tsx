@@ -22,6 +22,7 @@ const NAV_ITEMS = [
   { href: "/issue", label: "Issue" },
   { href: "/stock", label: "Current Stock" },
   { href: "/stock-tracking", label: "Stock Tracking" },
+  { href: "/alerts", label: "Alerts"}
 ];
 
 export default function ProtectedLayout({ children }: { children: ReactNode }) {
@@ -110,6 +111,14 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
                     className={navigationMenuTriggerStyle()}
                     >
                       Stock Tracking
+                    </NavigationMenuLink>
+                </NavigationMenuItem>
+                <NavigationMenuItem>
+                  <NavigationMenuLink
+                    render={<Link href="/alerts" />}
+                    className={navigationMenuTriggerStyle()}
+                    >
+                      Alerts
                     </NavigationMenuLink>
                 </NavigationMenuItem>
               </NavigationMenuList>

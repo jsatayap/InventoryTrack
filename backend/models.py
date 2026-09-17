@@ -111,6 +111,26 @@ class StockBalance(Base):
     quantity = Column(Integer, nullable=False, default=0)
 
 
+class StockThreshold(Base):
+    __tablename__ = "stock_thresholds"
+
+    id = Column(Integer, primary_key=True)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
+    reorder_point = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(Integer, ForeignKey("users.id"))
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_by = Column(Integer, ForeignKey("users.id"))
+
+    __table_args__ = (
+        UniqueConstraint("product_id", "location_id", name="uq_stock_threshold_grain"),
+    )
+
+    product = relationship("Product")
+    location = relationship("Location")
+
+
 class Issue(Base):
     __tablename__ = "issues"
 

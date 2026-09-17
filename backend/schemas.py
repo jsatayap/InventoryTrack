@@ -318,6 +318,50 @@ class StockMonthlySummaryOut(BaseModel):
         from_attributes = True
 
 
+# ---------------- Low-stock alerts ----------------
+
+class StockThresholdBase(BaseModel):
+    product_id: uuid.UUID
+    location_id: int
+    reorder_point: int
+
+
+class StockThresholdCreate(StockThresholdBase):
+    """Creating a threshold for a (product_id, location_id) pair that already has
+    one is treated as an upsert by the route -- it updates reorder_point in place
+    rather than erroring on the unique constraint."""
+    pass
+
+
+class StockThresholdUpdate(BaseModel):
+    reorder_point: int
+
+
+class StockThresholdOut(StockThresholdBase):
+    id: int
+    sku: str | None = None
+    product_name: str | None = None
+    location_name: str | None = None
+    created_at: datetime
+    updated_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class LowStockAlertOut(BaseModel):
+    product_id: uuid.UUID
+    sku: str
+    name: str
+    series: str | None = None
+    is_serialized: bool
+    location_id: int
+    location_name: str
+    quantity: int
+    reorder_point: int
+    shortage: int  # reorder_point - quantity; always >= 0 for rows in this list
+
+
 class StockQuarterlySummaryOut(BaseModel):
     id: int
     quarter: date
