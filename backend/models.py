@@ -208,6 +208,53 @@ class StockMonthlySummary(Base):
     product = relationship("Product")
     location = relationship("Location")
 
+class StockQuarterlySummary(Base):
+    __tablename__ = "stock_quarterly_summary"
+
+    id = Column(Integer, primary_key=True)
+
+    # Grain
+    quarter = Column(Date, nullable=False)  # first day of quarter, e.g. 2026-01-01
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
+
+    # Denormalized descriptive fields (same as monthly)
+    sku = Column(String(50))
+    product_name = Column(String(150))
+    series = Column(String(100))
+    is_serialized = Column(Boolean, nullable=False, default=True)
+    location_code = Column(String(20))
+    location_name = Column(String(100))
+
+    # Rolled-up measures (summed from stock_monthly_summary, except opening/closing)
+    received_qty = Column(Integer, nullable=False, default=0)
+    opening_balance = Column(Integer, nullable=False, default=0)   # first month in quarter
+    issued_transfer_qty = Column(Integer, nullable=False, default=0)
+    issued_adjustment_qty = Column(Integer, nullable=False, default=0)
+    issued_wasted_qty = Column(Integer, nullable=False, default=0)
+    total_issued_qty = Column(Integer, nullable=False, default=0)
+    net_change_qty = Column(Integer, nullable=False, default=0)
+    closing_balance = Column(Integer, nullable=False, default=0)   # last month in quarter
+
+    # Value fields — plain sums of the monthly generated columns, not re-derived here
+    avg_unit_price = Column(Numeric(12, 2))  # weighted: SUM(received_value) / SUM(received_qty)
+    received_value = Column(Numeric(14, 2))
+    issued_value = Column(Numeric(14, 2))
+
+    # Traceability (approximate, inherited from monthly)
+    invoice_count = Column(Integer, nullable=False, default=0)
+    transaction_count = Column(Integer, nullable=False, default=0)
+
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("quarter", "product_id", "location_id", name="uq_quarterly_summary_grain"),
+    )
+
+    product = relationship("Product")
+    location = relationship("Location")
+
+
 class Config(Base):
     __tablename__ = "config"
 

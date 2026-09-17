@@ -316,3 +316,38 @@ class StockMonthlySummaryOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class StockQuarterlySummaryOut(BaseModel):
+    id: int
+    quarter: date
+    quarter_label: str | None = None  # e.g. "2026-Q1", set in the route handler
+    product_id: uuid.UUID
+    location_id: int
+
+    sku: str | None = None
+    product_name: str | None = None
+    series: str | None = None
+    is_serialized: bool
+    location_code: str | None = None
+    location_name: str | None = None
+
+    received_qty: int
+    opening_balance: int
+    issued_transfer_qty: int
+    issued_adjustment_qty: int
+    issued_wasted_qty: int
+    total_issued_qty: int
+    net_change_qty: int
+    closing_balance: int
+
+    avg_unit_price: float | None = None
+    received_value: float | None = None
+    issued_value: float | None = None
+
+    invoice_count: int
+    transaction_count: int
+    updated_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
