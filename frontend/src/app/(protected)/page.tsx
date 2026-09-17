@@ -86,7 +86,7 @@ export default function DashboardPage() {
   const [summaryGenerated, setSummaryGenerated] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [summaryPage, setSummaryPage] = useState(0);
-  const [summaryLimit, setSummaryLimit] = useState(50);
+  const [summaryLimit, setSummaryLimit] = useState(15);
   const [monthFrom, setMonthFrom] = useState(() => {
     const d = new Date();
     d.setDate(1);
@@ -99,6 +99,8 @@ export default function DashboardPage() {
   const [quarterlyLoading, setQuarterlyLoading] = useState(false);
   const [quarterlyGenerated, setQuarterlyGenerated] = useState(false);
   const [quarterlyError, setQuarterlyError] = useState<string | null>(null);
+  const [quarterlyPage, setQuarterlyPage] = useState(0);
+  const [quarterlyLimit, setQuarterlyLimit] = useState(15);
 
   const currentYear = new Date().getFullYear();
   const YEAR_OPTIONS = Array.from({ length: 5 }, (_, i) => currentYear - i);
@@ -162,6 +164,10 @@ export default function DashboardPage() {
     setSummaryPage(0);
   }, [selectedLocationIds, selectedProductIds, monthFrom, monthTo, summaryLimit]);
 
+  useEffect(() => {
+    setQuarterlyPage(0);
+  }, [quarterYear, quarterQuarter, quarterLocationId, quarterProductId, quarterlyLimit]);
+
   const handleGenerateSummary = useCallback(() => {
     setSummaryPage(0);
     fetchSummary(selectedLocationIds, selectedProductIds, 0, summaryLimit, monthFrom, monthTo);
@@ -173,6 +179,31 @@ export default function DashboardPage() {
     fetchSummary(selectedLocationIds, selectedProductIds, next, summaryLimit, monthFrom, monthTo);
   };
 
+  const fetchQuarterly = useCallback(
+    async (page: number, limit: number) => {
+      setQuarterlyLoading(true);
+      setQuarterlyError(null);
+      try {
+        const params = buildQuery({
+          year: quarterYear !== "all" ? quarterYear : undefined,
+          quarter: quarterQuarter !== "all" ? quarterQuarter : undefined,
+          location_id: quarterLocationId !== "all" ? quarterLocationId : undefined,
+          product_id: quarterProductId !== "all" ? quarterProductId : undefined,
+          skip: page * limit,
+          limit,
+        });
+        const rows = await api.get<QuarterlySummaryRow[]>(`/reports/quarterly-summary${params}`);
+        setQuarterlyRows(rows);
+        setQuarterlyGenerated(true);
+      } catch {
+        setQuarterlyError("Couldn't load the quarterly report. Try again.");
+      } finally {
+        setQuarterlyLoading(false);
+      }
+    },
+    [quarterYear, quarterQuarter, quarterLocationId, quarterProductId]
+  );
+
   const handleGenerateQuarterly = useCallback(async () => {
     setQuarterlyLoading(true);
     setQuarterlyError(null);
@@ -183,17 +214,20 @@ export default function DashboardPage() {
         location_id: quarterLocationId !== "all" ? quarterLocationId : undefined,
         product_id: quarterProductId !== "all" ? quarterProductId : undefined,
       });
-
       await api.post(`/reports/quarterly-summary/refresh${params}`);
-      const rows = await api.get<QuarterlySummaryRow[]>(`/reports/quarterly-summary${params}`);
-      setQuarterlyRows(rows);
-      setQuarterlyGenerated(true);
+      setQuarterlyPage(0);
+      await fetchQuarterly(0, quarterlyLimit);
     } catch {
       setQuarterlyError("Couldn't generate the quarterly report. Try again.");
-    } finally {
       setQuarterlyLoading(false);
     }
-  }, [quarterYear, quarterQuarter, quarterLocationId, quarterProductId]);
+  }, [quarterYear, quarterQuarter, quarterLocationId, quarterProductId, quarterlyLimit, fetchQuarterly]);
+
+  const goToQuarterlyPage = (page: number) => {
+    const next = Math.max(0, page);
+    setQuarterlyPage(next);
+    fetchQuarterly(next, quarterlyLimit);
+  };
 
   const toggleLocation = (id: number) =>
     setSelectedLocationIds((prev) =>
@@ -537,6 +571,39 @@ export default function DashboardPage() {
                     ))}
                   </SelectContent>
                 </Select>
+
+                <Select value={String(quarterlyLimit)} onValueChange={(v) => setQuarterlyLimit(Number(v))}>
+                  <SelectTrigger className="w-[90px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SUMMARY_LIMIT_OPTIONS.map((n) => (
+                      <SelectItem key={n} value={String(n)}>
+                        {n} / page
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => goToQuarterlyPage(quarterlyPage - 1)}
+                    disabled={!quarterlyGenerated || quarterlyPage === 0 || quarterlyLoading}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="text-xs text-neutral-500">Page {quarterlyPage + 1}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => goToQuarterlyPage(quarterlyPage + 1)}
+                    disabled={!quarterlyGenerated || quarterlyRows.length < quarterlyLimit || quarterlyLoading}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
 
                 <Button size="sm" className="ml-auto" onClick={handleGenerateQuarterly} disabled={quarterlyLoading}>
                   {quarterlyLoading ? "Generating..." : "Generate Report"}

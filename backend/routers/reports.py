@@ -104,6 +104,8 @@ def get_quarterly_summary(
     quarter: int | None = Query(None, ge=1, le=4),
     location_id: int | None = Query(None),
     product_id: str | None = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
     q = db.query(StockQuarterlySummary)
@@ -115,7 +117,13 @@ def get_quarterly_summary(
         q = q.filter(StockQuarterlySummary.location_id == location_id)
     if product_id:
         q = q.filter(StockQuarterlySummary.product_id == product_id)
-    rows = q.order_by(StockQuarterlySummary.quarter.desc()).all()
+
+    rows = (
+        q.order_by(StockQuarterlySummary.quarter.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
     out = []
     for r in rows:
