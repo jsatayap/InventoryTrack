@@ -189,3 +189,25 @@ export interface StockTransactionRow {
   created_by: number | null;
   created_at: string; // ISO timestamp
 }
+
+// ---------------- Month-end stock summary ----------------
+// Matches StockSummaryRowOut from stock_summary_router.py.
+// One row per product+location, for a single closed (frozen) month.
+export interface StockSummaryRow {
+  product_id: string;
+  sku: string;
+  product_name: string;
+  series: string | null;
+  location_id: number;
+  location_code: string;
+  location_name: string;
+
+  begin_qty: number;
+  receive_00_qty: number; // purchase
+  receive_01_qty: number; // transfer in
+  receive_55_qty: number; // adjust in
+  issue_01_qty: number;   // transfer out
+  issue_55_qty: number;   // adjust out
+  issue_99_qty: number;   // waste
+  close_qty: number;
+}
