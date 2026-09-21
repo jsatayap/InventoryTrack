@@ -51,6 +51,45 @@ function sumBy(rows: StockSummaryRow[], key: keyof StockSummaryRow) {
   return rows.reduce((total, row) => total + (row[key] as number), 0);
 }
 
+const QTY_KEYS: (keyof StockSummaryRow)[] = [
+  "begin_qty",
+  "receive_00_qty",
+  "receive_01_qty",
+  "receive_55_qty",
+  "issue_01_qty",
+  "issue_55_qty",
+  "issue_99_qty",
+  "close_qty",
+];
+
+// When multiple locations are selected, collapse the per-location rows for
+// each product into a single row whose quantities are the sum across those
+// locations, rather than showing one row per product-location pair.
+function combineAcrossLocations(rows: StockSummaryRow[]): StockSummaryRow[] {
+  const combined = new Map<
+    StockSummaryRow["product_id"],
+    StockSummaryRow & { _locationCount: number }
+  >();
+
+  for (const row of rows) {
+    const existing = combined.get(row.product_id);
+    if (!existing) {
+      combined.set(row.product_id, { ...row, _locationCount: 1 });
+      continue;
+    }
+    for (const key of QTY_KEYS) {
+      (existing[key] as number) += row[key] as number;
+    }
+    existing._locationCount += 1;
+  }
+
+  return Array.from(combined.values()).map(({ _locationCount, ...row }) => ({
+    ...row,
+    location_id: 0,
+    location_name: `Selected locations`,
+  }));
+}
+
 export default function StockSummaryPage() {
   const defaults = getDefaultYearMonth();
   const [year, setYear] = useState(defaults.year);
@@ -127,9 +166,12 @@ export default function StockSummaryPage() {
     return true;
   });
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const displayRows =
+    selectedLocationIds.length > 1 ? combineAcrossLocations(filteredRows) : filteredRows;
+
+  const totalPages = Math.max(1, Math.ceil(displayRows.length / pageSize));
   const pageStart = (currentPage - 1) * pageSize;
-  const pagedRows = filteredRows.slice(pageStart, pageStart + pageSize);
+  const pagedRows = displayRows.slice(pageStart, pageStart + pageSize);
 
   function handlePageSizeChange(value: string) {
     setPageSize(Number(value));
@@ -250,9 +292,9 @@ export default function StockSummaryPage() {
                   <th className="px-3 py-2 font-medium">Product</th>
                   <th className="px-3 py-2 font-medium">Location</th>
                   <th className="px-3 py-2 font-medium text-right">Begin</th>
-                  <th className="px-3 py-2 font-medium text-right">Recv Purchase</th>
-                  <th className="px-3 py-2 font-medium text-right">Recv Transfer</th>
-                  <th className="px-3 py-2 font-medium text-right">Recv Adjust</th>
+                  <th className="px-3 py-2 font-medium text-right">Receive Purchase</th>
+                  <th className="px-3 py-2 font-medium text-right">Receive Transfer</th>
+                  <th className="px-3 py-2 font-medium text-right">Receive Adjust</th>
                   <th className="px-3 py-2 font-medium text-right">Issue Transfer</th>
                   <th className="px-3 py-2 font-medium text-right">Issue Adjust</th>
                   <th className="px-3 py-2 font-medium text-right">Issue Waste</th>
@@ -296,20 +338,20 @@ export default function StockSummaryPage() {
                   ))
                 )}
               </tbody>
-              {filteredRows.length > 0 && (
+              {displayRows.length > 0 && (
                 <tfoot>
                   <tr className="border-t border-neutral-300 bg-neutral-50">
                     <td colSpan={3} className="px-3 py-2 text-right text-xs text-neutral-500 font-medium">
-                      Totals ({filteredRows.length} rows)
+                      Totals ({displayRows.length} rows)
                     </td>
-                    <td className="px-3 py-2 text-right font-semibold">{sumBy(filteredRows, "begin_qty")}</td>
-                    <td className="px-3 py-2 text-right font-semibold">{sumBy(filteredRows, "receive_00_qty")}</td>
-                    <td className="px-3 py-2 text-right font-semibold">{sumBy(filteredRows, "receive_01_qty")}</td>
-                    <td className="px-3 py-2 text-right font-semibold">{sumBy(filteredRows, "receive_55_qty")}</td>
-                    <td className="px-3 py-2 text-right font-semibold">{sumBy(filteredRows, "issue_01_qty")}</td>
-                    <td className="px-3 py-2 text-right font-semibold">{sumBy(filteredRows, "issue_55_qty")}</td>
-                    <td className="px-3 py-2 text-right font-semibold">{sumBy(filteredRows, "issue_99_qty")}</td>
-                    <td className="px-3 py-2 text-right font-semibold">{sumBy(filteredRows, "close_qty")}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{sumBy(displayRows, "begin_qty")}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{sumBy(displayRows, "receive_00_qty")}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{sumBy(displayRows, "receive_01_qty")}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{sumBy(displayRows, "receive_55_qty")}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{sumBy(displayRows, "issue_01_qty")}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{sumBy(displayRows, "issue_55_qty")}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{sumBy(displayRows, "issue_99_qty")}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{sumBy(displayRows, "close_qty")}</td>
                   </tr>
                 </tfoot>
               )}
