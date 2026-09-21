@@ -20,58 +20,85 @@ router = APIRouter(prefix="/reports/quarterly-summary", tags=["reports"])
 # "(:param IS NULL OR <condition>)" so the same parameterized query works
 # whether the caller wants everything or one specific year/quarter/location/product.
 REFRESH_SQL = text("""
-    INSERT INTO stock_quarterly_summary (
-        quarter, product_id, location_id,
-        sku, product_name, series, is_serialized, location_code, location_name,
-        received_qty, opening_balance,
-        issued_transfer_qty, issued_adjustment_qty, issued_wasted_qty, total_issued_qty,
-        net_change_qty, closing_balance,
-        avg_unit_price, received_value, issued_value,
-        invoice_count, transaction_count
-    )
-    SELECT
-        date_trunc('quarter', month)::date AS quarter,
-        product_id,
-        location_id,
-        MAX(sku), MAX(product_name), MAX(series), bool_and(is_serialized),
-        MAX(location_code), MAX(location_name),
-        SUM(received_qty),
-        (array_agg(opening_balance ORDER BY month ASC))[1],
-        SUM(issued_transfer_qty),
-        SUM(issued_adjustment_qty),
-        SUM(issued_wasted_qty),
-        SUM(total_issued_qty),
-        SUM(net_change_qty),
-        (array_agg(closing_balance ORDER BY month DESC))[1],
-        CASE WHEN SUM(received_qty) > 0
-             THEN SUM(received_value) / SUM(received_qty)
-             ELSE NULL END,
-        SUM(received_value),
-        SUM(issued_value),
-        SUM(invoice_count),
-        SUM(transaction_count)
-    FROM stock_monthly_summary
-    WHERE (:year IS NULL OR EXTRACT(YEAR FROM month) = :year)
-      AND (:quarter IS NULL OR EXTRACT(QUARTER FROM month) = :quarter)
-      AND (:location_id IS NULL OR location_id = :location_id)
-      AND (:product_id IS NULL OR product_id = CAST(:product_id AS uuid))
-    GROUP BY date_trunc('quarter', month), product_id, location_id
-    ON CONFLICT (quarter, product_id, location_id)
-    DO UPDATE SET
-        received_qty = EXCLUDED.received_qty,
-        opening_balance = EXCLUDED.opening_balance,
-        issued_transfer_qty = EXCLUDED.issued_transfer_qty,
-        issued_adjustment_qty = EXCLUDED.issued_adjustment_qty,
-        issued_wasted_qty = EXCLUDED.issued_wasted_qty,
-        total_issued_qty = EXCLUDED.total_issued_qty,
-        net_change_qty = EXCLUDED.net_change_qty,
-        closing_balance = EXCLUDED.closing_balance,
-        avg_unit_price = EXCLUDED.avg_unit_price,
-        received_value = EXCLUDED.received_value,
-        issued_value = EXCLUDED.issued_value,
-        invoice_count = EXCLUDED.invoice_count,
-        transaction_count = EXCLUDED.transaction_count,
-        updated_at = now()
+    MERGE INTO stock_quarterly_summary AS target
+    USING (
+        SELECT
+            date_trunc('quarter', month)::date AS quarter,
+            product_id,
+            location_id,
+            MAX(sku) AS sku,
+            MAX(product_name) AS product_name,
+            MAX(series) AS series,
+            bool_and(is_serialized) AS is_serialized,
+            MAX(location_code) AS location_code,
+            MAX(location_name) AS location_name,
+            SUM(received_qty) AS received_qty,
+            (array_agg(opening_balance ORDER BY month ASC))[1] AS opening_balance,
+            SUM(issued_transfer_qty) AS issued_transfer_qty,
+            SUM(issued_adjustment_qty) AS issued_adjustment_qty,
+            SUM(issued_wasted_qty) AS issued_wasted_qty,
+            SUM(total_issued_qty) AS total_issued_qty,
+            SUM(net_change_qty) AS net_change_qty,
+            (array_agg(closing_balance ORDER BY month DESC))[1] AS closing_balance,
+            CASE WHEN SUM(received_qty) > 0
+                 THEN SUM(received_value) / SUM(received_qty)
+                 ELSE NULL END AS avg_unit_price,
+            SUM(received_value) AS received_value,
+            SUM(issued_value) AS issued_value,
+            SUM(invoice_count) AS invoice_count,
+            SUM(transaction_count) AS transaction_count
+        FROM stock_monthly_summary
+        WHERE (:year IS NULL OR EXTRACT(YEAR FROM month) = :year)
+          AND (:quarter IS NULL OR EXTRACT(QUARTER FROM month) = :quarter)
+          AND (:location_id IS NULL OR location_id = :location_id)
+          AND (:product_id IS NULL OR product_id = CAST(:product_id AS uuid))
+        GROUP BY date_trunc('quarter', month), product_id, location_id
+    ) AS source
+    ON  target.quarter = source.quarter
+    AND target.product_id = source.product_id
+    AND target.location_id = source.location_id
+    WHEN MATCHED THEN
+        UPDATE SET
+            sku = source.sku,
+            product_name = source.product_name,
+            series = source.series,
+            is_serialized = source.is_serialized,
+            location_code = source.location_code,
+            location_name = source.location_name,
+            received_qty = source.received_qty,
+            opening_balance = source.opening_balance,
+            issued_transfer_qty = source.issued_transfer_qty,
+            issued_adjustment_qty = source.issued_adjustment_qty,
+            issued_wasted_qty = source.issued_wasted_qty,
+            total_issued_qty = source.total_issued_qty,
+            net_change_qty = source.net_change_qty,
+            closing_balance = source.closing_balance,
+            avg_unit_price = source.avg_unit_price,
+            received_value = source.received_value,
+            issued_value = source.issued_value,
+            invoice_count = source.invoice_count,
+            transaction_count = source.transaction_count,
+            updated_at = now()
+    WHEN NOT MATCHED THEN
+        INSERT (
+            quarter, product_id, location_id,
+            sku, product_name, series, is_serialized, location_code, location_name,
+            received_qty, opening_balance,
+            issued_transfer_qty, issued_adjustment_qty, issued_wasted_qty, total_issued_qty,
+            net_change_qty, closing_balance,
+            avg_unit_price, received_value, issued_value,
+            invoice_count, transaction_count
+        )
+        VALUES (
+            source.quarter, source.product_id, source.location_id,
+            source.sku, source.product_name, source.series, source.is_serialized,
+            source.location_code, source.location_name,
+            source.received_qty, source.opening_balance,
+            source.issued_transfer_qty, source.issued_adjustment_qty, source.issued_wasted_qty,
+            source.total_issued_qty, source.net_change_qty, source.closing_balance,
+            source.avg_unit_price, source.received_value, source.issued_value,
+            source.invoice_count, source.transaction_count
+        )
 """)
 
 

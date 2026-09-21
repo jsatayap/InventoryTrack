@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers import auth_router, products, locations, invoices, receive, issues, stock, reports, alerts
+from routers import stock_summary_router
 
 app = FastAPI(title="Smartphone Inventory API")
 
@@ -23,6 +24,7 @@ app.include_router(issues.router)
 app.include_router(stock.router)
 app.include_router(reports.router)
 app.include_router(alerts.router)
+app.include_router(stock_summary_router.router)
 
 
 @app.get("/health")

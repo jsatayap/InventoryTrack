@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 import auth, schemas
+from services.stock_summary import check_and_close_previous_month  # new import
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -17,6 +18,17 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Check if last month's stock summary needs closing.
+    # Wrapped so that if this ever fails, it never blocks someone from logging in.
+    try:
+        check_and_close_previous_month(db)
+    except Exception:
+        db.rollback()  # don't leave the session in a broken state for the rest of the request
+        import traceback
+        print("WARNING: check_and_close_previous_month failed -- investigate stock_summary_control")
+        traceback.print_exc()  # TODO: replace with real logging once you've set up a logger
+
     access_token = auth.create_access_token(data={"sub": user.username})
     return schemas.Token(access_token=access_token)
 

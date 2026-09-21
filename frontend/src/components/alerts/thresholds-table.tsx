@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +23,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
+import { PaginationBar } from "@/components/alerts/pagination-bar";
 import { ThresholdDialog, ThresholdInitial } from "@/components/alerts/threshold-dialog";
 
 interface Location {
@@ -39,6 +40,7 @@ interface StockThreshold {
   location_name: string | null;
   reorder_point: number;
 }
+const DEFAULT_PAGE_SIZE = 15;
 
 export function ThresholdsTable({ locations }: { locations: Location[] }) {
   const [thresholds, setThresholds] = useState<StockThreshold[]>([]);
@@ -50,6 +52,8 @@ export function ThresholdsTable({ locations }: { locations: Location[] }) {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ThresholdInitial | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   useEffect(() => {
     setLoading(true);
@@ -59,6 +63,15 @@ export function ThresholdsTable({ locations }: { locations: Location[] }) {
       setLoading(false);
     });
   }, [locationFilter, refreshKey]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [locationFilter, pageSize]);
+
+  const paged = useMemo(
+    () => thresholds.slice((page - 1) * pageSize, page * pageSize),
+    [thresholds, page, pageSize]
+  );
 
   const openEdit = (t: StockThreshold) => {
     setEditing({
@@ -122,7 +135,7 @@ export function ThresholdsTable({ locations }: { locations: Location[] }) {
               </TableCell>
             </TableRow>
           ) : (
-            thresholds.map((t) => (
+            paged.map((t) => (
               <TableRow key={t.id}>
                 <TableCell>{t.sku}</TableCell>
                 <TableCell>{t.product_name}</TableCell>
@@ -162,6 +175,14 @@ export function ThresholdsTable({ locations }: { locations: Location[] }) {
           )}
         </TableBody>
       </Table>
+      
+      <PaginationBar
+        page={page}
+        pageSize={pageSize}
+        totalItems={thresholds.length}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
 
       <ThresholdDialog
         open={dialogOpen}
