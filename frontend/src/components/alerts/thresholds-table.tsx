@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { PaginationBar } from "@/components/alerts/pagination-bar";
 import { ThresholdDialog, ThresholdInitial } from "@/components/alerts/threshold-dialog";
+import { Pencil, Trash2 } from "lucide-react";
 
 interface Location {
   id: number;
@@ -142,14 +143,24 @@ export function ThresholdsTable({ locations }: { locations: Location[] }) {
                 <TableCell>{t.location_name}</TableCell>
                 <TableCell className="text-right">{t.reorder_point.toLocaleString()}</TableCell>
                 <TableCell className="flex justify-end gap-1">
-                  <Button variant="ghost" size="sm" onClick={() => openEdit(t)}>
-                    Edit
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => openEdit(t)}
+                    aria-label="Edit threshold"
+                  >
+                    <Pencil className="h-4 w-4" />
                   </Button>
                   <AlertDialog>
                     <AlertDialogTrigger
                       render={
-                        <Button variant="ghost" size="sm" className="text-red-600">
-                          Delete
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-red-600"
+                          aria-label="Delete threshold"
+                        >
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       }
                     />

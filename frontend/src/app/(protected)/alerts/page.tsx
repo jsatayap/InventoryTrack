@@ -26,6 +26,7 @@ import { ThresholdDialog } from "@/components/alerts/threshold-dialog";
 import { ThresholdsTable } from "@/components/alerts/thresholds-table";
 import { PaginationBar } from "@/components/alerts/pagination-bar";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Pencil } from "lucide-react";
 
 interface Location {
   id: number;
@@ -43,14 +44,23 @@ interface LowStockAlert {
   quantity: number;
   reorder_point: number;
   shortage: number;
+  incoming_qty: number;
+  effective_stock: number;
+  alert_category: "critical" | "on_order";
 }
 
 const DEFAULT_PAGE_SIZE = 15;
+
+const CATEGORY_OPTIONS: { value: "critical" | "on_order"; label: string }[] = [
+  { value: "critical", label: "Critical" },
+  { value: "on_order", label: "On Order" },
+];
 
 export default function AlertsPage() {
   const [alerts, setAlerts] = useState<LowStockAlert[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [selectedLocationIds, setSelectedLocationIds] = useState<number[]>([]);
+  const [selectedCategories, setSelectedCategories] = useState<("critical" | "on_order")[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [page, setPage] = useState(1);
@@ -97,13 +107,27 @@ export default function AlertsPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [selectedLocationIds, pageSize]);
+  }, [selectedLocationIds, selectedCategories, pageSize]);
 
-  const clearFilters = () => setSelectedLocationIds([]);
+  const clearFilters = () => {
+    setSelectedLocationIds([]);
+    setSelectedCategories([]);
+  };
+
+  // Category filtering is done client-side (the backend already returns
+  // alert_category on every row) rather than round-tripping the API again --
+  // avoids the same multi-value fan-out problem the location filter has.
+  const filtered = useMemo(
+    () =>
+      selectedCategories.length === 0
+        ? alerts
+        : alerts.filter((a) => selectedCategories.includes(a.alert_category)),
+    [alerts, selectedCategories]
+  );
 
   const paged = useMemo(
-    () => alerts.slice((page - 1) * pageSize, page * pageSize),
-    [alerts, page, pageSize]
+    () => filtered.slice((page - 1) * pageSize, page * pageSize),
+    [filtered, page, pageSize]
   );
 
   const openEdit = (alert: LowStockAlert) => {
@@ -157,6 +181,31 @@ export default function AlertsPage() {
           </DropdownMenuContent>
         </DropdownMenu>
 
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="outline">
+                Status{selectedCategories.length ? ` (${selectedCategories.length})` : ""}
+              </Button>
+            }
+          />
+          <DropdownMenuContent>
+            {CATEGORY_OPTIONS.map((opt) => (
+              <DropdownMenuCheckboxItem
+                key={opt.value}
+                checked={selectedCategories.includes(opt.value)}
+                onCheckedChange={(checked) => {
+                  setSelectedCategories((prev) =>
+                    checked ? [...prev, opt.value] : prev.filter((v) => v !== opt.value)
+                  );
+                }}
+              >
+                {opt.label}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
         <Button variant="ghost" onClick={clearFilters}>
           Clear filters
         </Button>
@@ -169,21 +218,23 @@ export default function AlertsPage() {
             <TableHead>Product</TableHead>
             <TableHead>Location</TableHead>
             <TableHead className="text-right">Quantity</TableHead>
+            <TableHead className="text-right">Incoming</TableHead>
             <TableHead className="text-right">Reorder Point</TableHead>
             <TableHead className="text-right">Shortage</TableHead>
+            <TableHead>Status</TableHead>
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {loading ? (
             <TableRow>
-              <TableCell colSpan={7} className="text-center text-neutral-500">
+              <TableCell colSpan={9} className="text-center text-neutral-500">
                 Loading...
               </TableCell>
             </TableRow>
           ) : paged.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={7} className="text-center text-neutral-500">
+              <TableCell colSpan={9} className="text-center text-neutral-500">
                 No low-stock items.
               </TableCell>
             </TableRow>
@@ -202,13 +253,30 @@ export default function AlertsPage() {
                 </TableCell>
                 <TableCell>{a.location_name}</TableCell>
                 <TableCell className="text-right">{a.quantity.toLocaleString()}</TableCell>
+                <TableCell className="text-right">
+                  {a.incoming_qty > 0 ? `+${a.incoming_qty.toLocaleString()}` : "—"}
+                </TableCell>
                 <TableCell className="text-right">{a.reorder_point.toLocaleString()}</TableCell>
                 <TableCell className="text-right">
                   <Badge variant="destructive">{a.shortage.toLocaleString()}</Badge>
                 </TableCell>
                 <TableCell>
-                  <Button variant="ghost" size="sm" onClick={() => openEdit(a)}>
-                    Edit threshold
+                  {a.alert_category === "critical" ? (
+                    <Badge variant="destructive">Critical</Badge>
+                  ) : (
+                    <Badge variant="outline" className="border-amber-500 text-amber-600">
+                      On Order
+                    </Badge>
+                  )}
+                </TableCell>
+                <TableCell>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => openEdit(a)}
+                    aria-label="Edit threshold"
+                  >
+                    <Pencil className="h-4 w-4" />
                   </Button>
                 </TableCell>
               </TableRow>
@@ -220,7 +288,7 @@ export default function AlertsPage() {
       <PaginationBar
         page={page}
         pageSize={pageSize}
-        totalItems={alerts.length}
+        totalItems={filtered.length}
         onPageChange={setPage}
         onPageSizeChange={setPageSize}
       />

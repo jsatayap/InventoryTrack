@@ -360,7 +360,9 @@ class LowStockAlertOut(BaseModel):
     quantity: int
     reorder_point: int
     shortage: int  # reorder_point - quantity; always >= 0 for rows in this list
-
+    incoming_qty: int
+    effective_stock: int
+    alert_category: str  # "critical" | "on_order"
 
 class StockQuarterlySummaryOut(BaseModel):
     id: int

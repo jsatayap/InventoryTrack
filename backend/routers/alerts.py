@@ -134,6 +134,7 @@ def delete_threshold(
 @router.get("/low-stock", response_model=list[schemas.LowStockAlertOut])
 def get_low_stock_alerts(
     location_id: int | None = Query(None),
+    category: str | None = Query(None, description="Filter to 'critical' or 'on_order'"),
     db: Session = Depends(get_db),
     current_user=Depends(auth.get_current_user),
 ):
@@ -146,22 +147,54 @@ def get_low_stock_alerts(
     starting from current_stock would silently miss that "quantity is
     definitely 0" case. A row only appears here if a reorder_point has been
     configured; no threshold means no alert.
+
+    Also LEFT JOINs incoming quantity from open invoices (status pending/receiving)
+    at the same location, so a shortage already covered by a pending PO is flagged
+    as 'on_order' rather than 'critical'.
     """
     sql = """
+        WITH incoming AS (
+            SELECT
+                ii.product_id,
+                i.location_id,
+                SUM(ii.quantity - ii.received_qty) AS incoming_qty
+            FROM invoice_items ii
+            JOIN invoices i ON i.id = ii.invoice_id
+            WHERE i.status IN (0, 1)               -- pending, receiving
+              AND ii.quantity > ii.received_qty     -- skip fully-received lines
+            GROUP BY ii.product_id, i.location_id
+        )
         SELECT
             st.product_id, p.sku, p.name, p.series, p.is_serialized,
             st.location_id, l.name AS location_name,
             COALESCE(cs.quantity, 0) AS quantity,
             st.reorder_point,
-            (st.reorder_point - COALESCE(cs.quantity, 0)) AS shortage
+            (st.reorder_point - COALESCE(cs.quantity, 0)) AS shortage,
+            COALESCE(inc.incoming_qty, 0) AS incoming_qty,
+            (COALESCE(cs.quantity, 0) + COALESCE(inc.incoming_qty, 0)) AS effective_stock,
+            CASE
+                WHEN (COALESCE(cs.quantity, 0) + COALESCE(inc.incoming_qty, 0)) >= st.reorder_point
+                    THEN 'on_order'
+                ELSE 'critical'
+            END AS alert_category
         FROM stock_thresholds st
         JOIN products p ON p.id = st.product_id
         JOIN locations l ON l.id = st.location_id
         LEFT JOIN current_stock cs
             ON cs.product_id = st.product_id AND cs.location_id = st.location_id
+        LEFT JOIN incoming inc
+            ON inc.product_id = st.product_id AND inc.location_id = st.location_id
         WHERE COALESCE(cs.quantity, 0) <= st.reorder_point
           AND (:location_id IS NULL OR st.location_id = :location_id)
+          AND (:category IS NULL OR
+               CASE
+                   WHEN (COALESCE(cs.quantity, 0) + COALESCE(inc.incoming_qty, 0)) >= st.reorder_point
+                       THEN 'on_order'
+                   ELSE 'critical'
+               END = :category)
         ORDER BY shortage DESC, l.name, p.name
     """
-    rows = db.execute(text(sql), {"location_id": location_id}).mappings().all()
+    rows = db.execute(
+        text(sql), {"location_id": location_id, "category": category}
+    ).mappings().all()
     return [schemas.LowStockAlertOut(**row) for row in rows]
