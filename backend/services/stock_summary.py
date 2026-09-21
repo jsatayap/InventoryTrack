@@ -64,7 +64,7 @@ def _close_month(db: Session, month_start: date) -> None:
     prior_table = prior_row.table_name if prior_row else None
 
     if prior_table:
-        prev_join_sql = f"LEFT JOIN {prior_table} prev ON prev.product_id = c.product_id AND prev.location_id = c.location_id"
+        prev_join_sql = f"LEFT JOIN {prior_table} prev ON prev.product_id = f.product_id AND prev.location_id = f.location_id"
         combos_prev_sql = f"UNION SELECT product_id, location_id FROM {prior_table}"
         begin_qty_sql = "COALESCE(prev.close_qty, 0)"
     else:
@@ -78,13 +78,13 @@ def _close_month(db: Session, month_start: date) -> None:
 
     create_sql = f"""
         CREATE TABLE {table_name} AS
-        WITH this_month_tx AS (
+        WITH this_month_transactions AS (
             -- only the transactions that happened during this month
             SELECT product_id, location_id, trade_type, trade_code, quantity
             FROM stock_transactions
             WHERE created_at >= :month_start AND created_at < :next_month_start
         ),
-        agg AS (
+        monthly_total AS (
             -- pivot trade_type/trade_code into named columns, one row per product+location
             SELECT
                 product_id, location_id,
@@ -94,30 +94,30 @@ def _close_month(db: Session, month_start: date) -> None:
                 SUM(CASE WHEN trade_type = 'ISS' AND trade_code = 1  THEN quantity ELSE 0 END) AS issue_01_qty,
                 SUM(CASE WHEN trade_type = 'ISS' AND trade_code = 55 THEN quantity ELSE 0 END) AS issue_55_qty,
                 SUM(CASE WHEN trade_type = 'ISS' AND trade_code = 99 THEN quantity ELSE 0 END) AS issue_99_qty
-            FROM this_month_tx
+            FROM this_month_transactions
             GROUP BY product_id, location_id
         ),
-        combos AS (
+        full_list AS (
             -- every product+location that either moved this month, or carried a balance from last month
-            SELECT product_id, location_id FROM agg
+            SELECT product_id, location_id FROM monthly_total
             {combos_prev_sql}
         )
         SELECT
-            c.product_id,
-            c.location_id,
+            f.product_id,
+            f.location_id,
             {begin_qty_sql} AS begin_qty,
-            COALESCE(a.receive_00_qty, 0) AS receive_00_qty,
-            COALESCE(a.receive_01_qty, 0) AS receive_01_qty,
-            COALESCE(a.receive_55_qty, 0) AS receive_55_qty,
-            COALESCE(a.issue_01_qty, 0) AS issue_01_qty,
-            COALESCE(a.issue_55_qty, 0) AS issue_55_qty,
-            COALESCE(a.issue_99_qty, 0) AS issue_99_qty,
+            COALESCE(m.receive_00_qty, 0) AS receive_00_qty,
+            COALESCE(m.receive_01_qty, 0) AS receive_01_qty,
+            COALESCE(m.receive_55_qty, 0) AS receive_55_qty,
+            COALESCE(m.issue_01_qty, 0) AS issue_01_qty,
+            COALESCE(m.issue_55_qty, 0) AS issue_55_qty,
+            COALESCE(m.issue_99_qty, 0) AS issue_99_qty,
             {begin_qty_sql}
-                + COALESCE(a.receive_00_qty, 0) + COALESCE(a.receive_01_qty, 0) + COALESCE(a.receive_55_qty, 0)
-                - COALESCE(a.issue_01_qty, 0) - COALESCE(a.issue_55_qty, 0) - COALESCE(a.issue_99_qty, 0)
+                + COALESCE(m.receive_00_qty, 0) + COALESCE(m.receive_01_qty, 0) + COALESCE(m.receive_55_qty, 0)
+                - COALESCE(m.issue_01_qty, 0) - COALESCE(m.issue_55_qty, 0) - COALESCE(m.issue_99_qty, 0)
                 AS close_qty
-        FROM combos c
-        LEFT JOIN agg a ON a.product_id = c.product_id AND a.location_id = c.location_id
+        FROM full_list f
+        LEFT JOIN monthly_total m ON m.product_id = f.product_id AND m.location_id = f.location_id
         {prev_join_sql}
     """
     db.execute(text(create_sql), {"month_start": month_start, "next_month_start": next_month_start})
@@ -126,8 +126,6 @@ def _close_month(db: Session, month_start: date) -> None:
     db.execute(text(f"ALTER TABLE {table_name} ADD PRIMARY KEY (product_id, location_id)"))
 
     # record it as closed in the control table.
-    # MERGE requires Postgres 15+; if you're on an older version, swap this
-    # for INSERT ... ON CONFLICT (year_month) DO UPDATE SET ... instead.
     db.execute(
         text("""
             MERGE INTO stock_summary_control AS t
