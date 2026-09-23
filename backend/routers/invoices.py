@@ -1,21 +1,27 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, aliased
 
 from database import get_db
 import models, schemas, auth
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
+SourceLocation = aliased(models.Location)
+
 
 def _invoice_base_query(db: Session):
-    """Invoice query joined to config so status_label comes back in the same
-    round trip, instead of a second lookup query per request."""
+    """Invoice query joined to config (status label) and, when this invoice
+    exists to receive an incoming transfer, to the source Issue and its
+    origin location — so the frontend can show a "receiving transfer X from Y"
+    banner without a second round trip."""
     return (
-        db.query(models.Invoice, models.Config.value)
+        db.query(models.Invoice, models.Config.value, models.Issue.issue_no, SourceLocation.name)
         .outerjoin(
             models.Config,
             (models.Config.category == "invoice") & (models.Config.key == models.Invoice.status),
         )
+        .outerjoin(models.Issue, models.Issue.id == models.Invoice.source_issue_id)
+        .outerjoin(SourceLocation, SourceLocation.id == models.Issue.location_id)
         .options(
             joinedload(models.Invoice.items).joinedload(models.InvoiceItem.product),
             joinedload(models.Invoice.location),
@@ -23,7 +29,12 @@ def _invoice_base_query(db: Session):
     )
 
 
-def _to_invoice_out(invoice: models.Invoice, status_label: str | None) -> schemas.InvoiceOut:
+def _to_invoice_out(
+    invoice: models.Invoice,
+    status_label: str | None,
+    source_issue_no: str | None = None,
+    source_location_name: str | None = None,
+) -> schemas.InvoiceOut:
     return schemas.InvoiceOut(
         id=invoice.id,
         invoice_no=invoice.invoice_no,
@@ -32,6 +43,9 @@ def _to_invoice_out(invoice: models.Invoice, status_label: str | None) -> schema
         status=invoice.status,
         status_label=status_label,
         invoice_date=str(invoice.invoice_date),
+        source_issue_id=invoice.source_issue_id,
+        source_issue_no=source_issue_no,
+        source_location_name=source_location_name,
         created_by=invoice.created_by,
         items=[
             schemas.InvoiceItemOut(
@@ -61,7 +75,7 @@ def list_invoices(
         query = query.filter(models.Invoice.status == status)
 
     rows = query.order_by(models.Invoice.created_at.desc()).all()
-    return [_to_invoice_out(inv, label) for inv, label in rows]
+    return [_to_invoice_out(inv, label, issue_no, src_loc) for inv, label, issue_no, src_loc in rows]
 
 
 @router.get("/{invoice_id}", response_model=schemas.InvoiceOut)
@@ -69,8 +83,8 @@ def get_invoice(invoice_id: int, db: Session = Depends(get_db), current_user=Dep
     row = _invoice_base_query(db).filter(models.Invoice.id == invoice_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    invoice, label = row
-    return _to_invoice_out(invoice, label)
+    invoice, label, issue_no, src_loc = row
+    return _to_invoice_out(invoice, label, issue_no, src_loc)
 
 
 @router.post("", response_model=schemas.InvoiceOut, status_code=201)
@@ -122,8 +136,8 @@ def create_invoice(
 
     # reload with relationships (and status label) for the response
     row = _invoice_base_query(db).filter(models.Invoice.id == invoice.id).first()
-    invoice, label = row
-    return _to_invoice_out(invoice, label)
+    invoice, label, issue_no, src_loc = row
+    return _to_invoice_out(invoice, label, issue_no, src_loc)
 
 
 VALID_STATUSES = {0, 1, 2, 3}  # pending, receiving, completed, cancelled — see config: category='invoice'
@@ -216,5 +230,5 @@ def update_invoice(
     db.refresh(invoice)
 
     row = _invoice_base_query(db).filter(models.Invoice.id == invoice.id).first()
-    invoice, label = row
-    return _to_invoice_out(invoice, label)
+    invoice, label, issue_no, src_loc = row
+    return _to_invoice_out(invoice, label, issue_no, src_loc)

@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, FormEvent, Fragment } from "react";
+import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
-import { Location, Product, Issue, NewIssueItem } from "@/lib/types";
+import { Location, Product, Issue, NewIssueItem, TRANSFER_STATUS } from "@/lib/types";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +35,12 @@ const TRADE_CODES = [
   { code: "55", label: "Adjust / Stock tracking" },
   { code: "99", label: "Wasted" },
 ];
+
+// Matches the STATUS_STYLES convention on the invoice page.
+const TRANSFER_STATUS_STYLES: Record<string, string> = {
+  in_transit: "text-amber-700",
+  received: "text-green-700",
+};
 
 function Required() {
   return <span className="text-red-600">*</span>;
@@ -554,6 +561,7 @@ export default function IssuePage() {
               <th className="px-3 py-2 font-medium">Issue No.</th>
               <th className="px-3 py-2 font-medium">Location</th>
               <th className="px-3 py-2 font-medium">Reason</th>
+              <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Date</th>
               <th className="px-3 py-2 font-medium">Items</th>
             </tr>
@@ -561,13 +569,13 @@ export default function IssuePage() {
           <tbody>
             {isLoadingIssues ? (
               <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-neutral-400">
+                <td colSpan={6} className="px-3 py-6 text-center text-neutral-400">
                   Loading…
                 </td>
               </tr>
             ) : filteredIssues.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-neutral-400">
+                <td colSpan={6} className="px-3 py-6 text-center text-neutral-400">
                   {selectedLocationIds.length > 0
                     ? "No issues match the selected locations."
                     : "No issues yet."}
@@ -591,18 +599,34 @@ export default function IssuePage() {
                           <span className="text-neutral-400"> → {iss.to_location_name}</span>
                         )}
                       </td>
+                      <td className="px-3 py-2">
+                        {iss.transfer_status_label ? (
+                          <span
+                            className={`font-medium ${
+                              TRANSFER_STATUS_STYLES[iss.transfer_status_label] ?? "text-neutral-500"
+                            }`}
+                          >
+                            {iss.transfer_status_label}
+                          </span>
+                        ) : (
+                          <span className="text-neutral-300">—</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-neutral-500">{iss.issue_date}</td>
                       <td className="px-3 py-2 text-neutral-500">{iss.items.length}</td>
                     </tr>
                     {isExpanded && (
                       <tr className="border-b border-neutral-200 bg-neutral-50">
-                        <td colSpan={5} className="px-3 py-3">
+                        <td colSpan={6} className="px-3 py-3">
                           <table className="w-full text-xs">
                             <thead>
                               <tr className="text-neutral-500">
                                 <th className="text-left font-medium py-1">Product</th>
                                 <th className="text-left font-medium py-1">Serial</th>
                                 <th className="text-right font-medium py-1">Qty</th>
+                                {iss.transfer_status_label && (
+                                  <th className="text-right font-medium py-1">Received</th>
+                                )}
                               </tr>
                             </thead>
                             <tbody>
@@ -611,6 +635,17 @@ export default function IssuePage() {
                                   <td className="py-1">{item.product_name}</td>
                                   <td className="py-1 font-mono">{item.serial_number ?? "—"}</td>
                                   <td className="py-1 text-right">{item.quantity}</td>
+                                  {iss.transfer_status_label && (
+                                    <td
+                                      className={`py-1 text-right ${
+                                        item.received_qty >= item.quantity
+                                          ? "text-green-700"
+                                          : "text-amber-700"
+                                      }`}
+                                    >
+                                      {item.received_qty} / {item.quantity}
+                                    </td>
+                                  )}
                                 </tr>
                               ))}
                             </tbody>

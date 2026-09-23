@@ -81,6 +81,9 @@ export interface Invoice {
   status: number; // see INVOICE_STATUS
   status_label: string | null; // human-readable, resolved by the backend
   invoice_date: string;
+  source_issue_id: number | null;       // set when this invoice exists to receive an incoming transfer
+  source_issue_no: string | null;       // the transfer's issue_no, for display
+  source_location_name: string | null;  // the transfer's origin location, for display
   created_by: number | null;
   items: InvoiceItem[];
 }
@@ -113,7 +116,22 @@ export interface IssueItemOut {
   serial_number: string | null;
   quantity: number;
   unit_price: number | null;
+  received_qty: number; // only meaningful when the parent issue is a transfer (trade_code === 1)
 }
+
+// Transfer status codes — must match config table (category='transfer_status') on the backend.
+export const TRANSFER_STATUS = {
+  IN_TRANSIT: 1,
+  RECEIVED: 2,
+} as const;
+
+// Trade codes for issues — numeric on the backend (see StockTransactionRow.trade_code below).
+// 1: transfer, 55: adjustment, 99: wasted (per RAS spec).
+export const TRADE_CODE = {
+  TRANSFER: 1,
+  ADJUSTMENT: 55,
+  WASTE: 99,
+} as const;
 
 export interface Issue {
   id: number;
@@ -123,11 +141,23 @@ export interface Issue {
   to_location_id: number | null;
   to_location_name: string | null;
   reason_type: "trade_code" | "trade_description";
-  trade_code: string;
+  trade_code: number; // see TRADE_CODE
+  transfer_status: number | null; // see TRANSFER_STATUS; null unless this is a transfer (trade_code === 1)
+  transfer_status_label: string | null; // human-readable, resolved by the backend
   remark: string | null;
   issue_date: string;
   created_by: number | null;
   items: IssueItemOut[];
+}
+
+export interface TransferReceiveResult {
+  issue_id: number;
+  transfer_status: number; // see TRANSFER_STATUS
+  transfer_status_label: string | null;
+  product_id: string;
+  item_received_qty: number;
+  item_quantity: number;
+  message: string;
 }
 
 export interface NewIssueItem {

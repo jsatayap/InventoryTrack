@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Pencil } from "lucide-react";
+import { Pencil, ArrowRightLeft } from "lucide-react";
 
 const STATUS_STYLES: Record<string, string> = {
   pending: "text-neutral-500",
@@ -181,12 +181,29 @@ export default function InvoiceDetailPage() {
   }
 
   const isOpen = invoice.status === 0 || invoice.status === 1; // pending | receiving
+  const isTransfer = invoice.source_issue_id != null;
 
   return (
     <div>
       <Link href="/invoices" className="text-sm text-[#1E3A5F] hover:underline">
         ← Back to invoices
       </Link>
+
+      {isTransfer && (
+        <div className="mt-4 flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-900 text-sm px-3 py-2">
+          <ArrowRightLeft className="size-4 shrink-0" />
+          <span>
+            Receiving transfer{" "}
+            <span className="font-mono font-medium">{invoice.source_issue_no ?? `#${invoice.source_issue_id}`}</span>
+            {invoice.source_location_name && (
+              <>
+                {" "}from <span className="font-medium">{invoice.source_location_name}</span>
+              </>
+            )}
+            . Scanning or adding quantity here updates that transfer's status too.
+          </span>
+        </div>
+      )}
 
       <div className="flex items-start justify-between mt-4 mb-6">
         <div>

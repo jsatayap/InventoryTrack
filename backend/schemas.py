@@ -154,6 +154,9 @@ class InvoiceOut(BaseModel):
     status: int  # see config: category='invoice'
     status_label: str | None = None  # e.g. "pending" — resolved from config
     invoice_date: str
+    source_issue_id: int | None = None       # set when this invoice exists to receive an incoming transfer
+    source_issue_no: str | None = None        # NEW — the transfer's issue_no, for display
+    source_location_name: str | None = None   # NEW — the transfer's origin location, for display
     created_by: int | None = None
     items: list[InvoiceItemOut] = []
 
@@ -198,6 +201,7 @@ class IssueItemOut(BaseModel):
     serial_number: str | None = None
     quantity: int
     unit_price: float | None = None
+    received_qty: int = 0  # only meaningful when the parent issue is a transfer (trade_code == 1)
 
     class Config:
         from_attributes = True
@@ -221,6 +225,8 @@ class IssueOut(BaseModel):
     to_location_name: str | None = None
     trade_code: int
     trade_code_label: str | None = None  # e.g. "transfer" — resolved from config
+    transfer_status: int | None = None  # see config: category='transfer_status'; null unless trade_code == 1
+    transfer_status_label: str | None = None  # e.g. "in_transit" / "received"
     remark: str | None = None
     issue_date: str
     created_by: int | None = None
@@ -228,6 +234,27 @@ class IssueOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ---------------- Transfer receiving (destination confirmation) ----------------
+
+class TransferReceiveSerialRequest(BaseModel):
+    serial_number: str
+
+
+class TransferReceiveQuantityRequest(BaseModel):
+    product_id: uuid.UUID
+    quantity: int
+
+
+class TransferReceiveResultOut(BaseModel):
+    issue_id: int
+    transfer_status: int  # see config: category='transfer_status'
+    transfer_status_label: str | None = None
+    product_id: uuid.UUID
+    item_received_qty: int
+    item_quantity: int
+    message: str
 
 
 # ---------------- Stock (read-only views) ----------------

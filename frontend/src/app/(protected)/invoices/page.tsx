@@ -2,8 +2,9 @@
 
 import { useEffect, useState, FormEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
-import { Invoice, Location, Product, NewInvoiceItem } from "@/lib/types";
+import { Invoice, Issue, Location, Product, NewInvoiceItem, TRANSFER_STATUS, TRADE_CODE } from "@/lib/types";
 import {
   Dialog,
   DialogContent,
@@ -45,14 +46,27 @@ const STATUS_STYLES: Record<string, string> = {
 
 const STATUS_OPTIONS = ["pending", "receiving", "completed", "cancelled"];
 
+// Same palette as STATUS_STYLES above, keyed by transfer_status_label instead.
+const TRANSFER_STATUS_STYLES: Record<string, string> = {
+  in_transit: "text-amber-700",
+  received: "text-green-700",
+};
+
 const emptyLine: NewInvoiceItem = { product_id: "", quantity: 1, unit_price: 0 };
 
 export default function InvoicesPage() {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<"invoices" | "transfers">("invoices");
+
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [transfers, setTransfers] = useState<Issue[]>([]);
+  const [isLoadingTransfers, setIsLoadingTransfers] = useState(true);
+  const [transfersError, setTransfersError] = useState<string | null>(null);
 
   const [selectedLocationIds, setSelectedLocationIds] = useState<number[]>([]);
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
@@ -71,6 +85,7 @@ export default function InvoicesPage() {
     api.get<Location[]>("/locations").then(setLocations).catch(() => {});
     api.get<Product[]>("/products").then(setProducts).catch(() => {});
     fetchInvoices();
+    fetchTransfers();
   }, []);
 
   async function fetchInvoices() {
@@ -84,6 +99,29 @@ export default function InvoicesPage() {
       setError(err instanceof ApiError ? err.message : "Could not load invoices.");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function fetchTransfers() {
+    setIsLoadingTransfers(true);
+    setTransfersError(null);
+    try {
+      const data = await api.get<Issue[]>("/issues");
+      setTransfers(data.filter((iss) => iss.trade_code === TRADE_CODE.TRANSFER));
+    } catch (err) {
+      setTransfersError(err instanceof ApiError ? err.message : "Could not load incoming transfers.");
+    } finally {
+      setIsLoadingTransfers(false);
+    }
+  }
+
+  async function handleReceiveTransfer(issueId: number) {
+    setTransfersError(null);
+    try {
+      const invoice = await api.post<Invoice>(`/issues/${issueId}/receiving-invoice`, {});
+      router.push(`/invoices/${invoice.id}`);
+    } catch (err) {
+      setTransfersError(err instanceof ApiError ? err.message : "Could not open receiving invoice.");
     }
   }
 
@@ -173,7 +211,7 @@ export default function InvoicesPage() {
 
   const filteredInvoices = invoices.filter((inv) => {
     const locationMatch =
-      selectedLocationNames.length === 0 || selectedLocationNames.includes(inv.location_name);
+      selectedLocationNames.length === 0 || selectedLocationNames.includes(inv.location_name ?? "");
     const statusMatch = selectedStatuses.length === 0 || selectedStatuses.includes(inv.status_label ?? "");
     return locationMatch && statusMatch;
   });
@@ -189,136 +227,138 @@ export default function InvoicesPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold text-neutral-900">Invoices</h1>
-        <Dialog
-          open={showAddForm}
-          onOpenChange={(open) => {
-            setShowAddForm(open);
-            if (!open) resetAddForm();
-          }}
-        >
-          <DialogTrigger
-            render={
-              <Button className="bg-[#1E3A5F] text-white hover:bg-[#16304d]">
-                New Invoice
-              </Button>
-            }
-          />
-          <DialogContent className="sm:max-w-3xl max-h-[85vh] flex flex-col">
-            <DialogHeader>
-              <DialogTitle>New Invoice</DialogTitle>
-            </DialogHeader>
 
-            <form onSubmit={handleCreate} className="overflow-y-auto pr-1 -mr-1">
-              <FieldGroup>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <Field>
-                    <FieldLabel htmlFor="invoice-no">Invoice No.</FieldLabel>
-                    <Input
-                      id="invoice-no"
-                      required
-                      value={invoiceNo}
-                      onChange={(e) => setInvoiceNo(e.target.value)}
-                      placeholder="INV-0002"
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="invoice-location">Receiving Location</FieldLabel>
-                    <select
-                      id="invoice-location"
-                      required
-                      value={invoiceLocation}
-                      onChange={(e) => setInvoiceLocation(e.target.value ? Number(e.target.value) : "")}
-                      className="input"
-                    >
-                      <option value="">Select…</option>
-                      {locations.map((loc) => (
-                        <option key={loc.id} value={loc.id}>
-                          {loc.name}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant={activeTab === "invoices" ? "default" : "outline"}
+            onClick={() => setActiveTab("invoices")}
+          >
+            Invoices
+          </Button>
+          <Button
+            variant={activeTab === "transfers" ? "default" : "outline"}
+            onClick={() => setActiveTab("transfers")}
+          >
+            Incoming Transfers
+          </Button>
 
-                <div className="border border-neutral-200">
-                  <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-neutral-50 text-xs text-neutral-500 font-medium">
-                    <div className="col-span-5">Product</div>
-                    <div className="col-span-2">Qty</div>
-                    <div className="col-span-2">Unit price</div>
-                    <div className="col-span-2 text-right">Line total</div>
-                    <div className="col-span-1"></div>
-                  </div>
-                  {lines.map((line, i) => (
-                    <div key={i} className="grid grid-cols-12 gap-2 px-3 py-2 border-t border-neutral-200 items-center">
-                      <select
-                        className="input col-span-5"
-                        value={line.product_id || ""}
-                        onChange={(e) => handleProductPick(i, e.target.value)}
+          {activeTab === "invoices" && (
+            <Dialog open={showAddForm} onOpenChange={setShowAddForm}>
+              <DialogTrigger
+                render={<Button onClick={() => setShowAddForm(true)}>New Invoice</Button>}
+              />
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>New Invoice</DialogTitle>
+                </DialogHeader>
+                <form onSubmit={handleCreate}>
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel htmlFor="invoice-no">Invoice No.</FieldLabel>
+                      <Input
+                        id="invoice-no"
+                        value={invoiceNo}
+                        onChange={(e) => setInvoiceNo(e.target.value)}
+                        required
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="invoice-location">Location</FieldLabel>
+                      <Select
+                        value={invoiceLocation ? String(invoiceLocation) : ""}
+                        onValueChange={(v) => setInvoiceLocation(Number(v))}
                       >
-                        <option value="">Select product…</option>
-                        {products.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} {p.storage_size != null ? `(${p.storage_size} GB)` : ""}
-                          </option>
-                        ))}
-                      </select>
-                      <Input
-                        type="number"
-                        min={1}
-                        className="col-span-2"
-                        value={line.quantity}
-                        onChange={(e) => updateLine(i, { quantity: Number(e.target.value) })}
-                      />
-                      <Input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        className="col-span-2"
-                        value={line.unit_price}
-                        onChange={(e) => updateLine(i, { unit_price: Number(e.target.value) })}
-                      />
-                      <div className="col-span-2 text-right text-sm">{lineTotal(line).toLocaleString()}</div>
-                      <div className="col-span-1 text-right">
-                        {lines.length > 1 && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="text-red-600 hover:text-red-700"
-                            onClick={() => removeLine(i)}
+                        <SelectTrigger id="invoice-location">
+                          <SelectValue placeholder="Select a location" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {locations.map((loc) => (
+                            <SelectItem key={loc.id} value={String(loc.id)}>
+                              {loc.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+
+                    {lines.map((line, i) => (
+                      <div key={i} className="flex items-end gap-2">
+                        <Field className="flex-1">
+                          <FieldLabel>Product</FieldLabel>
+                          <Select
+                            value={line.product_id}
+                            onValueChange={(v) => handleProductPick(i, v)}
                           >
-                            Remove
-                          </Button>
-                        )}
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select a product" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {products.map((p) => (
+                                <SelectItem key={p.id} value={p.id}>
+                                  {p.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                        <Field className="w-24">
+                          <FieldLabel>Qty</FieldLabel>
+                          <Input
+                            type="number"
+                            min={1}
+                            value={line.quantity}
+                            onChange={(e) => updateLine(i, { quantity: Number(e.target.value) })}
+                          />
+                        </Field>
+                        <Field className="w-28">
+                          <FieldLabel>Unit Price</FieldLabel>
+                          <Input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={line.unit_price}
+                            onChange={(e) => updateLine(i, { unit_price: Number(e.target.value) })}
+                          />
+                        </Field>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => removeLine(i)}
+                          disabled={lines.length === 1}
+                        >
+                          Remove
+                        </Button>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
 
-                <div className="flex items-center justify-between">
-                  <Button type="button" variant="ghost" onClick={addLine}>
-                    + Add line
-                  </Button>
-                  <div className="text-sm font-medium">
-                    Total: {grandTotal.toLocaleString()}
-                  </div>
-                </div>
+                    <Button type="button" variant="outline" onClick={addLine}>
+                      Add Line
+                    </Button>
 
-                <div className="flex items-center gap-3">
-                  <Button type="submit" disabled={isSaving}>
-                    {isSaving ? "Saving…" : "Create invoice"}
-                  </Button>
-                  {formError && <p className="text-sm text-red-700">{formError}</p>}
-                </div>
-              </FieldGroup>
-            </form>
-          </DialogContent>
-        </Dialog>
+                    <p className="text-sm text-neutral-600">
+                      Total: {grandTotal.toFixed(2)}
+                    </p>
+
+                    {formError && (
+                      <p className="text-sm text-red-700">{formError}</p>
+                    )}
+
+                    <Button type="submit" disabled={isSaving}>
+                      {isSaving ? "Saving…" : "Create Invoice"}
+                    </Button>
+                  </FieldGroup>
+                </form>
+              </DialogContent>
+            </Dialog>
+          )}
+        </div>
       </div>
 
-      <div className="border border-neutral-300 bg-white p-4 mb-4 flex flex-wrap gap-3 items-center">
+      {activeTab === "invoices" && (
+      <>
+      <div className="flex items-center gap-2 mb-4">
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -483,6 +523,79 @@ export default function InvoicesPage() {
           </Pagination>
         </div>
       </div>
+      </>
+      )}
+
+      {activeTab === "transfers" && (
+        <div className="border border-neutral-300 bg-white overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-neutral-300 bg-neutral-50 text-left text-neutral-500">
+                <th className="px-3 py-2 font-medium">Issue No.</th>
+                <th className="px-3 py-2 font-medium">From</th>
+                <th className="px-3 py-2 font-medium">To</th>
+                <th className="px-3 py-2 font-medium">Date</th>
+                <th className="px-3 py-2 font-medium">Items</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {transfersError ? (
+                <tr>
+                  <td colSpan={7} className="px-3 py-6 text-center text-red-700">
+                    {transfersError}
+                  </td>
+                </tr>
+              ) : isLoadingTransfers ? (
+                <tr>
+                  <td colSpan={7} className="px-3 py-6 text-center text-neutral-400">
+                    Loading…
+                  </td>
+                </tr>
+              ) : transfers.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-3 py-6 text-center text-neutral-400">
+                    No transfers yet.
+                  </td>
+                </tr>
+              ) : (
+                transfers.map((t) => {
+                  const isInTransit = t.transfer_status === TRANSFER_STATUS.IN_TRANSIT;
+                  return (
+                    <tr key={t.id} className="border-b border-neutral-200 last:border-0 hover:bg-neutral-50">
+                      <td className="px-3 py-2 font-mono text-xs">{t.issue_no}</td>
+                      <td className="px-3 py-2 text-neutral-600">{t.location_name}</td>
+                      <td className="px-3 py-2 text-neutral-600">{t.to_location_name}</td>
+                      <td className="px-3 py-2 text-neutral-500">{t.issue_date}</td>
+                      <td className="px-3 py-2 text-neutral-500">{t.items.length}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={
+                            (t.transfer_status_label && TRANSFER_STATUS_STYLES[t.transfer_status_label]) ?? ""
+                          }
+                        >
+                          {t.transfer_status_label ?? "—"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {isInTransit && (
+                          <button
+                            onClick={() => handleReceiveTransfer(t.id)}
+                            className="text-[#1E3A5F] hover:underline text-xs font-medium"
+                          >
+                            Receive
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

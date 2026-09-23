@@ -1,0 +1,1 @@
+ALTER TABLE invoices ADD COLUMN source_issue_id INTEGER REFERENCES issues(id);

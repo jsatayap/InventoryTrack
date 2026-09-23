@@ -63,11 +63,13 @@ class Invoice(Base):
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
     status = Column(Integer, nullable=False, default=0)  # see config: category='invoice'
     invoice_date = Column(Date, nullable=False, server_default=func.current_date())
+    source_issue_id = Column(Integer, ForeignKey("issues.id"))  # set only when this invoice exists to receive an incoming transfer
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     items = relationship("InvoiceItem", back_populates="invoice", cascade="all, delete-orphan")
     location = relationship("Location")
+    source_issue = relationship("Issue")
 
 
 class InvoiceItem(Base):
@@ -139,6 +141,7 @@ class Issue(Base):
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
     to_location_id = Column(Integer, ForeignKey("locations.id"))  # destination, only for trade_code 1 (transfer)
     trade_code = Column(Integer, nullable=False)  # see config: category='issue'
+    transfer_status = Column(Integer)  # see config: category='transfer_status'; null unless trade_code == 1
     remark = Column(Text)
     issue_date = Column(Date, nullable=False, server_default=func.current_date())
     created_by = Column(Integer, ForeignKey("users.id"))
@@ -158,6 +161,7 @@ class IssueItem(Base):
     product_unit_id = Column(Integer, ForeignKey("products_actual.id"))
     quantity = Column(Integer, nullable=False, default=1)
     unit_price = Column(Numeric(12, 2))
+    received_qty = Column(Integer, nullable=False, default=0)  # only meaningful for trade_code == 1 (transfer)
 
     issue = relationship("Issue", back_populates="items")
     product = relationship("Product")
