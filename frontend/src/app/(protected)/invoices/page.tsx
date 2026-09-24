@@ -253,6 +253,7 @@ export default function InvoicesPage() {
                 <DialogHeader>
                   <DialogTitle>New Invoice</DialogTitle>
                 </DialogHeader>
+                <div className="-mx-4 scrollbar max-h-[70vh] overflow-y-auto px-4">
                 <form onSubmit={handleCreate}>
                   <FieldGroup>
                     <Field>
@@ -350,6 +351,7 @@ export default function InvoicesPage() {
                     </Button>
                   </FieldGroup>
                 </form>
+                </div>
               </DialogContent>
             </Dialog>
           )}
