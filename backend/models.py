@@ -185,7 +185,44 @@ class StockTransaction(Base):
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+class TradeCode(Base):
+    """Config: which RCV/ISS trade codes exist. Drives the per-code columns
+    of stock_monthly_summary. Deactivate codes, never delete them."""
+    __tablename__ = "trade_codes"
+
+    id = Column(Integer, primary_key=True)
+    trade_type = Column(String(3), nullable=False)  # 'RCV' | 'ISS'
+    code = Column(Integer, nullable=False)
+    column_name = Column(Text, Computed("lower(trade_type) || '_' || lpad(code::text, 2, '0')", persisted=True))
+    description = Column(Text)
+    sort_order = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("trade_type", "code", name="uq_trade_codes"),
+    )
+
+
+class ClosedPeriod(Base):
+    """A closed month. Written only by fn_close_month(); rows cannot be
+    updated or deleted (DB trigger)."""
+    __tablename__ = "closed_periods"
+
+    month = Column(Date, primary_key=True)
+    closed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    closed_by = Column(Integer, ForeignKey("users.id"))
+
+
 class StockMonthlySummary(Base):
+    """Closed-month snapshot, one row per (month, product, location).
+
+    Only the FIXED columns are mapped here. The per-trade-code columns
+    (rcv_00, iss_01, ...) are added at runtime by add_trade_code() and are
+    deliberately NOT mapped: read them with raw SQL (see
+    stock_summary_service.py). Rows are written only by fn_close_month() and
+    are immutable afterwards (DB trigger) -- never insert/update via the ORM.
+    """
     __tablename__ = "stock_monthly_summary"
 
     id = Column(Integer, primary_key=True)
@@ -195,7 +232,7 @@ class StockMonthlySummary(Base):
     product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
 
-    # Denormalized descriptive fields
+    # Descriptive fields, frozen at close time
     sku = Column(String(50))
     product_name = Column(String(150))
     series = Column(String(100))
@@ -203,76 +240,25 @@ class StockMonthlySummary(Base):
     location_code = Column(String(20))
     location_name = Column(String(100))
 
-    # Transaction measures
-    received_qty = Column(Integer, nullable=False, default=0)
-    issued_qty = Column(Integer, nullable=False, default=0)  # original total, kept for backward compat
+    # Totals
     opening_balance = Column(Integer, nullable=False, default=0)
-    issued_transfer_qty = Column(Integer, nullable=False, default=0)     # trade_code 1
-    issued_adjustment_qty = Column(Integer, nullable=False, default=0)   # trade_code 55
-    issued_wasted_qty = Column(Integer, nullable=False, default=0)       # trade_code 99
-    total_issued_qty = Column(Integer, nullable=False, default=0)
+    received_qty = Column(Integer, nullable=False, default=0)       # all RCV codes
+    total_issued_qty = Column(Integer, nullable=False, default=0)   # all ISS codes
     net_change_qty = Column(Integer, nullable=False, default=0)
     closing_balance = Column(Integer, nullable=False, default=0)
 
-    # Value fields — generated columns, DB-computed, read-only in the ORM
-    avg_unit_price = Column(Numeric(12, 2))
+    # Value fields -- generated columns, DB-computed, read-only in the ORM
+    avg_unit_price = Column(Numeric(12, 2))  # product price on the day of close
     received_value = Column(Numeric(14, 2), Computed("received_qty * COALESCE(avg_unit_price, 0)", persisted=True))
     issued_value = Column(Numeric(14, 2), Computed("total_issued_qty * COALESCE(avg_unit_price, 0)", persisted=True))
 
-    # Traceability (approximate — see migration notes on invoice_count)
     invoice_count = Column(Integer, nullable=False, default=0)
     transaction_count = Column(Integer, nullable=False, default=0)
 
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    closed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("month", "product_id", "location_id", name="uq_monthly_summary_grain"),
-    )
-
-    product = relationship("Product")
-    location = relationship("Location")
-
-class StockQuarterlySummary(Base):
-    __tablename__ = "stock_quarterly_summary"
-
-    id = Column(Integer, primary_key=True)
-
-    # Grain
-    quarter = Column(Date, nullable=False)  # first day of quarter, e.g. 2026-01-01
-    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
-    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
-
-    # Denormalized descriptive fields (same as monthly)
-    sku = Column(String(50))
-    product_name = Column(String(150))
-    series = Column(String(100))
-    is_serialized = Column(Boolean, nullable=False, default=True)
-    location_code = Column(String(20))
-    location_name = Column(String(100))
-
-    # Rolled-up measures (summed from stock_monthly_summary, except opening/closing)
-    received_qty = Column(Integer, nullable=False, default=0)
-    opening_balance = Column(Integer, nullable=False, default=0)   # first month in quarter
-    issued_transfer_qty = Column(Integer, nullable=False, default=0)
-    issued_adjustment_qty = Column(Integer, nullable=False, default=0)
-    issued_wasted_qty = Column(Integer, nullable=False, default=0)
-    total_issued_qty = Column(Integer, nullable=False, default=0)
-    net_change_qty = Column(Integer, nullable=False, default=0)
-    closing_balance = Column(Integer, nullable=False, default=0)   # last month in quarter
-
-    # Value fields — plain sums of the monthly generated columns, not re-derived here
-    avg_unit_price = Column(Numeric(12, 2))  # weighted: SUM(received_value) / SUM(received_qty)
-    received_value = Column(Numeric(14, 2))
-    issued_value = Column(Numeric(14, 2))
-
-    # Traceability (approximate, inherited from monthly)
-    invoice_count = Column(Integer, nullable=False, default=0)
-    transaction_count = Column(Integer, nullable=False, default=0)
-
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    __table_args__ = (
-        UniqueConstraint("quarter", "product_id", "location_id", name="uq_quarterly_summary_grain"),
     )
 
     product = relationship("Product")

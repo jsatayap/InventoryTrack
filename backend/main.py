@@ -22,7 +22,7 @@ app.include_router(invoices.router)
 app.include_router(receive.router)
 app.include_router(issues.router)
 app.include_router(stock.router)
-app.include_router(reports.router)
+# app.include_router(reports.router)
 app.include_router(alerts.router)
 app.include_router(stock_summary_router.router)
 

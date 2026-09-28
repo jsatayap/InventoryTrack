@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime, date
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Token(BaseModel):
@@ -310,8 +311,27 @@ class MonthlyStockTrendOut(BaseModel):
     received: int
     issued: int
 
-class StockMonthlySummaryOut(BaseModel):
+class TradeCodeOut(BaseModel):
     id: int
+    trade_type: str          # 'RCV' | 'ISS'
+    code: int
+    column_name: str         # e.g. "iss_01" -- the key used in `quantities`
+    description: str | None = None
+    sort_order: int = 0
+    is_active: bool = True
+
+    class Config:
+        from_attributes = True
+
+
+class TradeCodeCreate(BaseModel):
+    trade_type: Literal["RCV", "ISS"]
+    code: int = Field(ge=0, le=999)
+    description: str | None = None
+
+
+class StockMonthlySummaryOut(BaseModel):
+    id: int | None = None        # None for the live (not yet closed) month
     month: date
     product_id: uuid.UUID
     location_id: int
@@ -323,13 +343,9 @@ class StockMonthlySummaryOut(BaseModel):
     location_code: str | None = None
     location_name: str | None = None
 
-    received_qty: int
-    issued_qty: int
     opening_balance: int
-    issued_transfer_qty: int
-    issued_adjustment_qty: int
-    issued_wasted_qty: int
-    total_issued_qty: int
+    received_qty: int            # all RCV codes
+    total_issued_qty: int        # all ISS codes
     net_change_qty: int
     closing_balance: int
 
@@ -339,10 +355,36 @@ class StockMonthlySummaryOut(BaseModel):
 
     invoice_count: int
     transaction_count: int
-    updated_at: datetime | None = None
+    closed_at: datetime | None = None   # None for the live month
+    is_closed: bool = False             # False = computed live (month not closed yet)
+
+    # Per-trade-code quantities keyed by trade_codes.column_name,
+    # e.g. {"rcv_00": 5, "iss_01": 2, "iss_55": 0, "iss_99": 1}
+    quantities: dict[str, int] = {}
 
     class Config:
         from_attributes = True
+
+
+class MonthlySummaryListOut(BaseModel):
+    columns: list[TradeCodeOut]           # header order for the `quantities` keys
+    total: int                            # rows matching the filters, before skip/limit
+    rows: list[StockMonthlySummaryOut]
+
+
+class PeriodStatusOut(BaseModel):
+    closed_months: list[date]
+    next_month_to_close: date | None = None
+    can_close_next: bool = False
+
+
+class CloseMonthRequest(BaseModel):
+    month: date
+
+
+class CloseMonthResult(BaseModel):
+    month: date
+    rows_written: int
 
 
 # ---------------- Low-stock alerts ----------------
@@ -390,37 +432,3 @@ class LowStockAlertOut(BaseModel):
     incoming_qty: int
     effective_stock: int
     alert_category: str  # "critical" | "on_order"
-
-class StockQuarterlySummaryOut(BaseModel):
-    id: int
-    quarter: date
-    quarter_label: str | None = None  # e.g. "2026-Q1", set in the route handler
-    product_id: uuid.UUID
-    location_id: int
-
-    sku: str | None = None
-    product_name: str | None = None
-    series: str | None = None
-    is_serialized: bool
-    location_code: str | None = None
-    location_name: str | None = None
-
-    received_qty: int
-    opening_balance: int
-    issued_transfer_qty: int
-    issued_adjustment_qty: int
-    issued_wasted_qty: int
-    total_issued_qty: int
-    net_change_qty: int
-    closing_balance: int
-
-    avg_unit_price: float | None = None
-    received_value: float | None = None
-    issued_value: float | None = None
-
-    invoice_count: int
-    transaction_count: int
-    updated_at: datetime | None = None
-
-    class Config:
-        from_attributes = True
