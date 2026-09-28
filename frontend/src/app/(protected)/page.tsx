@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { api, buildQuery } from "@/lib/api";
+import { api } from "@/lib/api";
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend,
@@ -24,7 +24,6 @@ import {
   Select, SelectTrigger, SelectContent, SelectItem, SelectValue,
 } from "@/components/ui/select";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ChevronDown, Check, ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -36,8 +35,17 @@ interface MonthlyTrend {
 interface LocationOption { id: number; name: string; }
 interface ProductOption { id: string; name: string; sku: string; }
 
-interface MonthlySummaryRow {
+interface TradeCodeColumn {
   id: number;
+  trade_type: string; // "RCV" | "ISS"
+  code: number;
+  column_name: string; // key into MonthlySummaryRow.quantities, e.g. "iss_01"
+  description: string | null;
+  is_active: boolean;
+}
+
+interface MonthlySummaryRow {
+  id: number | null; // null while the month is still open (computed live)
   month: string; // "YYYY-MM-DD"
   product_id: string;
   location_id: number;
@@ -45,30 +53,28 @@ interface MonthlySummaryRow {
   product_name: string | null;
   location_name: string | null;
   opening_balance: number;
-  received_qty: number;
-  total_issued_qty: number;
+  received_qty: number; // all RCV codes
+  total_issued_qty: number; // all ISS codes
   net_change_qty: number;
   closing_balance: number;
+  is_closed: boolean; // false = current month, still changing
+  quantities: Record<string, number>; // per trade code, keyed by column_name
 }
 
-interface QuarterlySummaryRow {
-  id: number;
-  quarter: string; // "YYYY-MM-DD"
-  quarter_label: string | null; // "2026-Q1"
-  product_id: string;
-  location_id: number;
-  sku: string | null;
-  product_name: string | null;
-  location_name: string | null;
-  opening_balance: number;
-  received_qty: number;
-  total_issued_qty: number;
-  net_change_qty: number;
-  closing_balance: number;
-  avg_unit_price: number | null;
+interface MonthlySummaryResponse {
+  columns: TradeCodeColumn[]; // header order for `quantities`
+  total: number; // rows matching the filters, before paging
+  rows: MonthlySummaryRow[];
 }
 
 const SUMMARY_LIMIT_OPTIONS = [15, 30, 45, 60];
+
+// "YYYY-MM" from the LOCAL date. toISOString() is UTC, which puts the first
+// hours of a new month (e.g. Bangkok, UTC+7) into the previous month.
+const toMonthInput = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+
+const codeLabel = (c: TradeCodeColumn) => `${c.trade_type} ${String(c.code).padStart(2, "0")}`;
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -82,6 +88,9 @@ export default function DashboardPage() {
   const [productSearch, setProductSearch] = useState("");
 
   const [summaryRows, setSummaryRows] = useState<MonthlySummaryRow[]>([]);
+  const [summaryColumns, setSummaryColumns] = useState<TradeCodeColumn[]>([]);
+  const [summaryTotal, setSummaryTotal] = useState(0);
+  const [summaryPageSize, setSummaryPageSize] = useState(15); // page size used by the last fetch
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryGenerated, setSummaryGenerated] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -91,23 +100,9 @@ export default function DashboardPage() {
     const d = new Date();
     d.setDate(1);
     d.setMonth(d.getMonth() - 5);
-    return d.toISOString().slice(0, 7); // "YYYY-MM"
+    return toMonthInput(d);
   });
-  const [monthTo, setMonthTo] = useState(() => new Date().toISOString().slice(0, 7));
-
-  const [quarterlyRows, setQuarterlyRows] = useState<QuarterlySummaryRow[]>([]);
-  const [quarterlyLoading, setQuarterlyLoading] = useState(false);
-  const [quarterlyGenerated, setQuarterlyGenerated] = useState(false);
-  const [quarterlyError, setQuarterlyError] = useState<string | null>(null);
-  const [quarterlyPage, setQuarterlyPage] = useState(0);
-  const [quarterlyLimit, setQuarterlyLimit] = useState(15);
-
-  const currentYear = new Date().getFullYear();
-  const YEAR_OPTIONS = Array.from({ length: 5 }, (_, i) => currentYear - i);
-  const [quarterYear, setQuarterYear] = useState<string>(String(currentYear));
-  const [quarterQuarter, setQuarterQuarter] = useState<string>("all"); // "all" | "1".."4"
-  const [quarterLocationId, setQuarterLocationId] = useState<string>("all");
-  const [quarterProductId, setQuarterProductId] = useState<string>("all");
+  const [monthTo, setMonthTo] = useState(() => toMonthInput(new Date()));
 
   useEffect(() => {
     api.get("/locations").then(setLocations).catch(() => {});
@@ -145,9 +140,12 @@ export default function DashboardPage() {
       if (locIds.length) params.set("location_ids", locIds.join(","));
       if (prodIds.length) params.set("product_ids", prodIds.join(","));
 
-      api.get<MonthlySummaryRow[]>(`/stock/monthly-summary?${params.toString()}`)
-        .then((rows) => {
-          setSummaryRows(rows);
+      api.get<MonthlySummaryResponse>(`/stock/monthly-summary?${params.toString()}`)
+        .then((res) => {
+          setSummaryRows(res.rows);
+          setSummaryColumns(res.columns);
+          setSummaryTotal(res.total);
+          setSummaryPageSize(limit);
           setSummaryGenerated(true);
         })
         .catch(() => setSummaryError("Couldn't generate the monthly report. Try again."))
@@ -164,10 +162,6 @@ export default function DashboardPage() {
     setSummaryPage(0);
   }, [selectedLocationIds, selectedProductIds, monthFrom, monthTo, summaryLimit]);
 
-  useEffect(() => {
-    setQuarterlyPage(0);
-  }, [quarterYear, quarterQuarter, quarterLocationId, quarterProductId, quarterlyLimit]);
-
   const handleGenerateSummary = useCallback(() => {
     setSummaryPage(0);
     fetchSummary(selectedLocationIds, selectedProductIds, 0, summaryLimit, monthFrom, monthTo);
@@ -177,56 +171,6 @@ export default function DashboardPage() {
     const next = Math.max(0, page);
     setSummaryPage(next);
     fetchSummary(selectedLocationIds, selectedProductIds, next, summaryLimit, monthFrom, monthTo);
-  };
-
-  const fetchQuarterly = useCallback(
-    async (page: number, limit: number) => {
-      setQuarterlyLoading(true);
-      setQuarterlyError(null);
-      try {
-        const params = buildQuery({
-          year: quarterYear !== "all" ? quarterYear : undefined,
-          quarter: quarterQuarter !== "all" ? quarterQuarter : undefined,
-          location_id: quarterLocationId !== "all" ? quarterLocationId : undefined,
-          product_id: quarterProductId !== "all" ? quarterProductId : undefined,
-          skip: page * limit,
-          limit,
-        });
-        const rows = await api.get<QuarterlySummaryRow[]>(`/reports/quarterly-summary${params}`);
-        setQuarterlyRows(rows);
-        setQuarterlyGenerated(true);
-      } catch {
-        setQuarterlyError("Couldn't load the quarterly report. Try again.");
-      } finally {
-        setQuarterlyLoading(false);
-      }
-    },
-    [quarterYear, quarterQuarter, quarterLocationId, quarterProductId]
-  );
-
-  const handleGenerateQuarterly = useCallback(async () => {
-    setQuarterlyLoading(true);
-    setQuarterlyError(null);
-    try {
-      const params = buildQuery({
-        year: quarterYear !== "all" ? quarterYear : undefined,
-        quarter: quarterQuarter !== "all" ? quarterQuarter : undefined,
-        location_id: quarterLocationId !== "all" ? quarterLocationId : undefined,
-        product_id: quarterProductId !== "all" ? quarterProductId : undefined,
-      });
-      await api.post(`/reports/quarterly-summary/refresh${params}`);
-      setQuarterlyPage(0);
-      await fetchQuarterly(0, quarterlyLimit);
-    } catch {
-      setQuarterlyError("Couldn't generate the quarterly report. Try again.");
-      setQuarterlyLoading(false);
-    }
-  }, [quarterYear, quarterQuarter, quarterLocationId, quarterProductId, quarterlyLimit, fetchQuarterly]);
-
-  const goToQuarterlyPage = (page: number) => {
-    const next = Math.max(0, page);
-    setQuarterlyPage(next);
-    fetchQuarterly(next, quarterlyLimit);
   };
 
   const toggleLocation = (id: number) =>
@@ -249,16 +193,11 @@ export default function DashboardPage() {
     `${p.name} ${p.sku}`.toLowerCase().includes(productSearch.toLowerCase())
   );
 
-  const quarterQuarterLabel =
-    quarterQuarter === "all" ? "All quarters" : `Q${quarterQuarter}`;
-  const quarterLocationLabel =
-    quarterLocationId === "all"
-      ? "All locations"
-      : locations.find((l) => String(l.id) === quarterLocationId)?.name ?? "Location";
-  const quarterProductLabel =
-    quarterProductId === "all"
-      ? "All products"
-      : products.find((p) => p.id === quarterProductId)?.name ?? "Product";
+  const summaryPages = Math.max(1, Math.ceil(summaryTotal / summaryPageSize));
+  const rcvColumns = summaryColumns.filter((c) => c.trade_type === "RCV");
+  const issColumns = summaryColumns.filter((c) => c.trade_type === "ISS");
+  // Month, Location, Product, Opening, RCV codes, Received, ISS codes, Issued, Net, Closing
+  const summaryColSpan = 4 + rcvColumns.length + 1 + issColumns.length + 1 + 2;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
@@ -399,76 +338,74 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Stock balances / quarterly summary, switched via tabs so they never stack */}
+        {/* Monthly summary: closed months are the stored snapshot, the current month is computed live */}
         <Card className="flex min-h-0 flex-col lg:col-span-3">
-          <Tabs defaultValue="monthly" className="flex min-h-0 flex-1 flex-col">
-            <CardHeader className="flex-row items-center justify-between gap-2 space-y-0 py-3">
-              <TabsList>
-                <TabsTrigger value="monthly">Monthly Summary</TabsTrigger>
-                <TabsTrigger value="quarterly">Quarterly Summary</TabsTrigger>
-              </TabsList>
-            </CardHeader>
+          <CardHeader className="py-3">
+            <CardTitle className="text-sm font-medium">Monthly Summary</CardTitle>
+          </CardHeader>
+          <CardContent className="flex min-h-0 flex-1 flex-col gap-2 pb-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                type="month"
+                value={monthFrom}
+                onChange={(e) => setMonthFrom(e.target.value)}
+                className="w-32"
+              />
+              <span className="text-xs text-neutral-500">to</span>
+              <Input
+                type="month"
+                value={monthTo}
+                onChange={(e) => setMonthTo(e.target.value)}
+                className="w-32"
+              />
 
-            <TabsContent value="monthly" className="flex min-h-0 flex-1 flex-col gap-2 px-6 pb-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Input
-                  type="month"
-                  value={monthFrom}
-                  onChange={(e) => setMonthFrom(e.target.value)}
-                  className="w-32"
-                />
-                <span className="text-xs text-neutral-500">to</span>
-                <Input
-                  type="month"
-                  value={monthTo}
-                  onChange={(e) => setMonthTo(e.target.value)}
-                  className="w-32"
-                />
+              <Select value={String(summaryLimit)} onValueChange={(v) => setSummaryLimit(Number(v))}>
+                <SelectTrigger className="w-[90px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SUMMARY_LIMIT_OPTIONS.map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n} / page
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-                <Select value={String(summaryLimit)} onValueChange={(v) => setSummaryLimit(Number(v))}>
-                  <SelectTrigger className="w-[90px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SUMMARY_LIMIT_OPTIONS.map((n) => (
-                      <SelectItem key={n} value={String(n)}>
-                        {n} / page
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => goToSummaryPage(summaryPage - 1)}
-                    disabled={!summaryGenerated || summaryPage === 0 || summaryLoading}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <span className="text-xs text-neutral-500">Page {summaryPage + 1}</span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => goToSummaryPage(summaryPage + 1)}
-                    disabled={!summaryGenerated || summaryRows.length < summaryLimit || summaryLoading}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-
-                <Button size="sm" className="ml-auto" onClick={handleGenerateSummary} disabled={summaryLoading}>
-                  {summaryLoading ? "Generating..." : "Generate Report"}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => goToSummaryPage(summaryPage - 1)}
+                  disabled={!summaryGenerated || summaryPage === 0 || summaryLoading}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-xs text-neutral-500">
+                  Page {summaryPage + 1}{summaryGenerated && ` of ${summaryPages}`}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => goToSummaryPage(summaryPage + 1)}
+                  disabled={!summaryGenerated || summaryPage + 1 >= summaryPages || summaryLoading}
+                >
+                  <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
 
-              {summaryError && (
-                <p className="text-sm text-red-600">{summaryError}</p>
-              )}
+              <Button size="sm" className="ml-auto" onClick={handleGenerateSummary} disabled={summaryLoading}>
+                {summaryLoading ? "Generating..." : "Generate Report"}
+              </Button>
+            </div>
 
-              {summaryGenerated ? (
-                <ScrollArea className="min-h-0 flex-1 rounded-md border border-neutral-200">
+            {summaryError && (
+              <p className="text-sm text-red-600">{summaryError}</p>
+            )}
+
+            {summaryGenerated ? (
+              <>
+                <div className="min-h-0 flex-1 overflow-auto rounded-md border border-neutral-200">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -476,7 +413,17 @@ export default function DashboardPage() {
                         <TableHead>Location</TableHead>
                         <TableHead>Product</TableHead>
                         <TableHead className="text-right">Opening</TableHead>
+                        {rcvColumns.map((c) => (
+                          <TableHead key={c.column_name} className="text-right text-neutral-500" title={c.description ?? undefined}>
+                            {codeLabel(c)}
+                          </TableHead>
+                        ))}
                         <TableHead className="text-right">Received</TableHead>
+                        {issColumns.map((c) => (
+                          <TableHead key={c.column_name} className="text-right text-neutral-500" title={c.description ?? undefined}>
+                            {codeLabel(c)}
+                          </TableHead>
+                        ))}
                         <TableHead className="text-right">Issued</TableHead>
                         <TableHead className="text-right">Net Change</TableHead>
                         <TableHead className="text-right">Closing</TableHead>
@@ -484,15 +431,32 @@ export default function DashboardPage() {
                     </TableHeader>
                     <TableBody>
                       {summaryRows.map((row) => (
-                        <TableRow key={row.id}>
-                          <TableCell>{row.month.slice(0, 7)}</TableCell>
+                        <TableRow key={`${row.month}-${row.product_id}-${row.location_id}`}>
+                          <TableCell className="whitespace-nowrap">
+                            {row.month.slice(0, 7)}
+                            {!row.is_closed && (
+                              <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-800">
+                                Open
+                              </span>
+                            )}
+                          </TableCell>
                           <TableCell>{row.location_name}</TableCell>
                           <TableCell>
                             {row.product_name}
                             {row.sku && <span className="ml-1 text-neutral-400">{row.sku}</span>}
                           </TableCell>
                           <TableCell className="text-right">{row.opening_balance.toLocaleString()}</TableCell>
+                          {rcvColumns.map((c) => (
+                            <TableCell key={c.column_name} className="text-right text-neutral-500">
+                              {(row.quantities[c.column_name] ?? 0).toLocaleString()}
+                            </TableCell>
+                          ))}
                           <TableCell className="text-right">{row.received_qty.toLocaleString()}</TableCell>
+                          {issColumns.map((c) => (
+                            <TableCell key={c.column_name} className="text-right text-neutral-500">
+                              {(row.quantities[c.column_name] ?? 0).toLocaleString()}
+                            </TableCell>
+                          ))}
                           <TableCell className="text-right">{row.total_issued_qty.toLocaleString()}</TableCell>
                           <TableCell className="text-right">{row.net_change_qty.toLocaleString()}</TableCell>
                           <TableCell className="text-right">{row.closing_balance.toLocaleString()}</TableCell>
@@ -500,172 +464,26 @@ export default function DashboardPage() {
                       ))}
                       {summaryRows.length === 0 && !summaryLoading && (
                         <TableRow>
-                          <TableCell colSpan={8} className="text-center text-neutral-500">
+                          <TableCell colSpan={summaryColSpan} className="text-center text-neutral-500">
                             No data for the selected filters.
                           </TableCell>
                         </TableRow>
                       )}
                     </TableBody>
                   </Table>
-                </ScrollArea>
-              ) : (
-                <p className="text-sm text-neutral-500">
-                  Click "Generate Report" to build the monthly summary.
-                </p>
-              )}
-            </TabsContent>
-
-            <TabsContent value="quarterly" className="flex min-h-0 flex-1 flex-col gap-2 px-6 pb-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Select value={quarterYear} onValueChange={setQuarterYear}>
-                  <SelectTrigger className="w-[100px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All years</SelectItem>
-                    {YEAR_OPTIONS.map((y) => (
-                      <SelectItem key={y} value={String(y)}>
-                        {y}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Select value={quarterQuarter} onValueChange={setQuarterQuarter}>
-                  <SelectTrigger className="w-[110px]">
-                    <SelectValue>{quarterQuarterLabel}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All quarters</SelectItem>
-                    <SelectItem value="1">Q1</SelectItem>
-                    <SelectItem value="2">Q2</SelectItem>
-                    <SelectItem value="3">Q3</SelectItem>
-                    <SelectItem value="4">Q4</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Select value={quarterLocationId} onValueChange={setQuarterLocationId}>
-                  <SelectTrigger className="w-[140px]">
-                    <SelectValue placeholder="Location">{quarterLocationLabel}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All locations</SelectItem>
-                    {locations.map((loc) => (
-                      <SelectItem key={loc.id} value={String(loc.id)}>
-                        {loc.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Select value={quarterProductId} onValueChange={setQuarterProductId}>
-                  <SelectTrigger className="w-[160px]">
-                    <SelectValue placeholder="Product">{quarterProductLabel}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All products</SelectItem>
-                    {products.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Select value={String(quarterlyLimit)} onValueChange={(v) => setQuarterlyLimit(Number(v))}>
-                  <SelectTrigger className="w-[90px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SUMMARY_LIMIT_OPTIONS.map((n) => (
-                      <SelectItem key={n} value={String(n)}>
-                        {n} / page
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => goToQuarterlyPage(quarterlyPage - 1)}
-                    disabled={!quarterlyGenerated || quarterlyPage === 0 || quarterlyLoading}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <span className="text-xs text-neutral-500">Page {quarterlyPage + 1}</span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => goToQuarterlyPage(quarterlyPage + 1)}
-                    disabled={!quarterlyGenerated || quarterlyRows.length < quarterlyLimit || quarterlyLoading}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
                 </div>
-
-                <Button size="sm" className="ml-auto" onClick={handleGenerateQuarterly} disabled={quarterlyLoading}>
-                  {quarterlyLoading ? "Generating..." : "Generate Report"}
-                </Button>
-              </div>
-
-              {quarterlyError && (
-                <p className="text-sm text-red-600">{quarterlyError}</p>
-              )}
-
-              {quarterlyGenerated ? (
-                <ScrollArea className="min-h-0 flex-1 rounded-md border border-neutral-200">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Quarter</TableHead>
-                        <TableHead>Location</TableHead>
-                        <TableHead>Product</TableHead>
-                        <TableHead className="text-right">Opening</TableHead>
-                        <TableHead className="text-right">Received</TableHead>
-                        <TableHead className="text-right">Issued</TableHead>
-                        <TableHead className="text-right">Net Change</TableHead>
-                        <TableHead className="text-right">Closing</TableHead>
-                        <TableHead className="text-right">Avg Price</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {quarterlyRows.map((row) => (
-                        <TableRow key={row.id}>
-                          <TableCell>{row.quarter_label ?? row.quarter.slice(0, 7)}</TableCell>
-                          <TableCell>{row.location_name}</TableCell>
-                          <TableCell>
-                            {row.product_name}
-                            {row.sku && <span className="ml-1 text-neutral-400">{row.sku}</span>}
-                          </TableCell>
-                          <TableCell className="text-right">{row.opening_balance.toLocaleString()}</TableCell>
-                          <TableCell className="text-right">{row.received_qty.toLocaleString()}</TableCell>
-                          <TableCell className="text-right">{row.total_issued_qty.toLocaleString()}</TableCell>
-                          <TableCell className="text-right">{row.net_change_qty.toLocaleString()}</TableCell>
-                          <TableCell className="text-right">{row.closing_balance.toLocaleString()}</TableCell>
-                          <TableCell className="text-right">
-                            {row.avg_unit_price != null ? row.avg_unit_price.toLocaleString() : "—"}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                      {quarterlyRows.length === 0 && !quarterlyLoading && (
-                        <TableRow>
-                          <TableCell colSpan={9} className="text-center text-neutral-500">
-                            No data for the selected filters.
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </ScrollArea>
-              ) : (
-                <p className="text-sm text-neutral-500">
-                  Click "Generate Report" to build the quarterly summary.
-                </p>
-              )}
-            </TabsContent>
-          </Tabs>
+                {summaryRows.some((r) => !r.is_closed) && (
+                  <p className="text-xs text-neutral-500">
+                    Months marked "Open" are still in progress and can change until the month is closed.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-neutral-500">
+                Click "Generate Report" to build the monthly summary.
+              </p>
+            )}
+          </CardContent>
         </Card>
       </div>
     </div>
