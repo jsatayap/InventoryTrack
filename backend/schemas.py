@@ -334,7 +334,7 @@ class StockMonthlySummaryOut(BaseModel):
     id: int | None = None        # None for the live (not yet closed) month
     month: date
     product_id: uuid.UUID
-    location_id: int
+    location_id: int | None = None
 
     sku: str | None = None
     product_name: str | None = None

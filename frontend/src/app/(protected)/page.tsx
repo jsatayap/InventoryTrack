@@ -48,7 +48,7 @@ interface MonthlySummaryRow {
   id: number | null; // null while the month is still open (computed live)
   month: string; // "YYYY-MM-DD"
   product_id: string;
-  location_id: number;
+  location_id: number | null; // null when several locations are combined into one row
   sku: string | null;
   product_name: string | null;
   location_name: string | null;
@@ -138,6 +138,7 @@ export default function DashboardPage() {
         limit: String(limit),
       });
       if (locIds.length) params.set("location_ids", locIds.join(","));
+      if (locIds.length > 1) params.set("combine_locations", "true"); // one row per month+product
       if (prodIds.length) params.set("product_ids", prodIds.join(","));
 
       api.get<MonthlySummaryResponse>(`/stock/monthly-summary?${params.toString()}`)
@@ -431,7 +432,7 @@ export default function DashboardPage() {
                     </TableHeader>
                     <TableBody>
                       {summaryRows.map((row) => (
-                        <TableRow key={`${row.month}-${row.product_id}-${row.location_id}`}>
+                        <TableRow key={`${row.month}-${row.product_id}-${row.location_id ?? "combined"}`}>
                           <TableCell className="whitespace-nowrap">
                             {row.month.slice(0, 7)}
                             {!row.is_closed && (

@@ -162,6 +162,7 @@ def get_monthly_summary(
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user=Depends(auth.get_current_user),
+    combine_locations: bool = Query(False, description="Sum the selected locations into one row per month+product"),
 ):
     """One row per (month, product, location), with per-trade-code quantities.
 
@@ -176,6 +177,7 @@ def get_monthly_summary(
         db, month_from, month_to,
         _parse_int_list(location_ids), _parse_uuid_list(product_ids),
         sku, product_name, skip, limit,
+        combine=combine_locations,
     )
 
 

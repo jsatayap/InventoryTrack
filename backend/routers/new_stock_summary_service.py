@@ -212,17 +212,64 @@ def fetch_live_rows(db: Session, month: date, codes: list[dict],
     return [dict(r) for r in db.execute(text(sql), params).mappings().all()]
 
 
+COMBINED_LOCATION_NAME = "Selected locations"
+
+# Additive per-row measures; the per-code columns are summed too (see below).
+_SUM_KEYS = (
+    "opening_balance", "received_qty", "total_issued_qty",
+    "net_change_qty", "closing_balance",
+    "received_value", "issued_value",
+    "invoice_count", "transaction_count",
+)
+
+
+def _combine_locations(rows: list[dict], codes: list[dict]) -> list[dict]:
+    """Collapse the per-location rows of each (month, product) into one row.
+
+    Everything here is additive, so summing is exact. A month is either closed
+    or not for every location at once, so closed_at is the same across a group.
+    Note: a transfer between two of the combined locations shows up in both
+    Received and Issued (net effect on the closing balance is zero).
+    """
+    groups: dict[tuple, dict] = {}
+    for r in rows:
+        key = (r["month"], r["product_id"])
+        g = groups.get(key)
+        if g is None:
+            g = {k: r.get(k) for k in ("month", "product_id", "sku", "product_name",
+                                        "series", "is_serialized", "avg_unit_price")}
+            g.update(id=None, location_id=None, location_code=None,
+                     location_name=COMBINED_LOCATION_NAME, closed_at=None)
+            for k in _SUM_KEYS:
+                g[k] = 0
+            for c in codes:
+                g[c["column_name"]] = 0
+            groups[key] = g
+        for k in _SUM_KEYS:
+            g[k] += r.get(k) or 0
+        for c in codes:
+            g[c["column_name"]] += r.get(c["column_name"]) or 0
+        if r.get("closed_at"):
+            g["closed_at"] = max(g["closed_at"] or r["closed_at"], r["closed_at"])
+    return list(groups.values())
+
+
 def get_summary_range(db: Session, month_from: date, month_to: date,
                       location_ids=None, product_ids=None, sku=None, product_name=None,
-                      skip: int = 0, limit: int = 100) -> dict:
+                      skip: int = 0, limit: int = 100, combine: bool = False) -> dict:
     """Closed months come from the stored snapshot, open months are computed
-    live; both are merged, sorted (newest month first) and paged."""
+    live; both are merged, sorted (newest month first) and paged.
+
+    combine=True sums the selected locations into one row per (month, product),
+    BEFORE paging, so `total` and the pages count combined rows."""
     month_from, month_to = first_of_month(month_from), first_of_month(month_to)
     codes = get_trade_codes(db)
 
     rows = fetch_closed_rows(db, month_from, month_to, location_ids, product_ids, sku, product_name)
     for m in open_months_between(db, month_from, month_to):
         rows += fetch_live_rows(db, m, codes, location_ids, product_ids, sku, product_name)
+    if combine:
+        rows = _combine_locations(rows, codes)
 
     rows.sort(key=lambda r: (-r["month"].toordinal(), r["location_name"] or "", r["product_name"] or ""))
     return {
