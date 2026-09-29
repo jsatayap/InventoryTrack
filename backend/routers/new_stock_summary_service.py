@@ -58,6 +58,26 @@ def add_trade_code(db: Session, trade_type: str, code: int, description: str | N
     return col
 
 
+_TRADE_CODE_EDITABLE = ("description", "is_active", "sort_order")
+
+
+def update_trade_code(db: Session, trade_code_id: int, fields: dict) -> dict | None:
+    """Edits description / is_active / sort_order only. trade_type and code are
+    immutable: column_name (and the stored summary column) is derived from them.
+    Returns the updated row, or None if the id doesn't exist."""
+    cols = [k for k in fields if k in _TRADE_CODE_EDITABLE]   # allow-list -> safe to interpolate
+    if not cols:
+        raise ValueError("nothing to update")
+    row = db.execute(
+        text(f"UPDATE trade_codes SET {', '.join(f'{k} = :{k}' for k in cols)} "
+             "WHERE id = :id "
+             "RETURNING id, trade_type, code, column_name, description, sort_order, is_active"),
+        {**{k: fields[k] for k in cols}, "id": trade_code_id},
+    ).mappings().first()
+    db.commit()
+    return dict(row) if row else None
+
+
 # -------------------------------------------------------------------- periods
 
 def current_month(db: Session) -> date:

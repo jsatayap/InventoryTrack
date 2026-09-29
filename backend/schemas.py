@@ -329,6 +329,10 @@ class TradeCodeCreate(BaseModel):
     code: int = Field(ge=0, le=999)
     description: str | None = None
 
+class TradeCodeUpdate(BaseModel):
+    description: str | None = None
+    is_active: bool | None = None
+    sort_order: int | None = None
 
 class StockMonthlySummaryOut(BaseModel):
     id: int | None = None        # None for the live (not yet closed) month

@@ -207,6 +207,25 @@ def create_trade_code(
                 if c["trade_type"] == body.trade_type and c["code"] == body.code)
 
 
+@router.patch("/trade-codes/{trade_code_id}", response_model=schemas.TradeCodeOut)
+def update_trade_code(
+    trade_code_id: int,
+    body: schemas.TradeCodeUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(_require_admin),
+):
+    """Edit description / sort order or (de)activate. type + code are immutable."""
+    fields = body.model_dump(exclude_unset=True)
+    # description may be set to null; the other two may not
+    fields = {k: v for k, v in fields.items() if k == "description" or v is not None}
+    if not fields:
+        raise HTTPException(400, "Nothing to update")
+    row = svc.update_trade_code(db, trade_code_id, fields)
+    if row is None:
+        raise HTTPException(404, "Trade code not found")
+    return row
+
+
 @router.get("/periods", response_model=schemas.PeriodStatusOut)
 def get_period_status(db: Session = Depends(get_db), current_user=Depends(auth.get_current_user)):
     """Closed months, the next month that can be closed, and whether it may be closed now."""

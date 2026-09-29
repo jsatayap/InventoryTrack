@@ -86,6 +86,16 @@ export default function MonthlyClosePage() {
   const [newDescription, setNewDescription] = useState("");
   const [addedColumn, setAddedColumn] = useState<string | null>(null);
 
+  // edit / deactivate trade code
+  const [editing, setEditing] = useState<TradeCode | null>(null);
+  const [editDescription, setEditDescription] = useState("");
+  const [editSortOrder, setEditSortOrder] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [deactivating, setDeactivating] = useState<TradeCode | null>(null);
+  const [toggleBusy, setToggleBusy] = useState(false);
+  const [toggleError, setToggleError] = useState<string | null>(null);
+
   const isAdmin = user?.role === ADMIN_ROLE;
 
   const load = useCallback(async () => {
@@ -158,6 +168,48 @@ export default function MonthlyClosePage() {
       setCodeError(errMessage(e, "Couldn't add the trade code."));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const openEdit = (c: TradeCode) => {
+    setEditing(c);
+    setEditDescription(c.description ?? "");
+    setEditSortOrder(String(c.sort_order ?? 0));
+    setEditError(null);
+  };
+
+  const sortValid = editSortOrder.trim() !== "" && Number.isInteger(Number(editSortOrder));
+
+  const handleSaveEdit = async () => {
+    if (!editing || !sortValid) return;
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      await api.patch<TradeCode>(`/stock/trade-codes/${editing.id}`, {
+        description: editDescription.trim() || null,
+        sort_order: Number(editSortOrder),
+      });
+      setEditing(null);
+      await load();
+    } catch (e) {
+      setEditError(errMessage(e, "Couldn't save the trade code."));
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const setActive = async (c: TradeCode, active: boolean) => {
+    setToggleBusy(true);
+    setToggleError(null);
+    try {
+      await api.patch<TradeCode>(`/stock/trade-codes/${c.id}`, { is_active: active });
+      setDeactivating(null);
+      await load();
+    } catch (e) {
+      setToggleError(errMessage(e, `Couldn't ${active ? "activate" : "deactivate"} the trade code.`));
+      setDeactivating(null);
+    } finally {
+      setToggleBusy(false);
     }
   };
 
@@ -256,6 +308,7 @@ export default function MonthlyClosePage() {
               summary.
             </p>
           )}
+          {toggleError && <p className="text-sm text-red-600">{toggleError}</p>}
           <div className="overflow-auto rounded-md border border-neutral-200">
             <Table>
               <TableHeader>
@@ -264,11 +317,12 @@ export default function MonthlyClosePage() {
                   <TableHead>Column</TableHead>
                   <TableHead>Description</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {codes.map((c) => (
-                  <TableRow key={c.id}>
+                  <TableRow key={c.id} className={c.is_active ? undefined : "text-neutral-400"}>
                     <TableCell className="whitespace-nowrap">{codeLabel(c)}</TableCell>
                     <TableCell className="text-neutral-500">{c.column_name}</TableCell>
                     <TableCell>{c.description ?? "—"}</TableCell>
@@ -277,11 +331,38 @@ export default function MonthlyClosePage() {
                         {c.is_active ? "Active" : "Inactive"}
                       </Badge>
                     </TableCell>
+                    <TableCell className="whitespace-nowrap text-right">
+                      <Button variant="ghost" size="sm" onClick={() => openEdit(c)}>
+                        Edit
+                      </Button>
+                      {c.is_active ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={toggleBusy}
+                          onClick={() => {
+                            setToggleError(null);
+                            setDeactivating(c);
+                          }}
+                        >
+                          Deactivate
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={toggleBusy}
+                          onClick={() => setActive(c, true)}
+                        >
+                          Activate
+                        </Button>
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
                 {codes.length === 0 && !loading && (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-neutral-500">
+                    <TableCell colSpan={5} className="text-center text-neutral-500">
                       No trade codes yet.
                     </TableCell>
                   </TableRow>
@@ -309,6 +390,74 @@ export default function MonthlyClosePage() {
             <AlertDialogCancel disabled={closing}>Cancel</AlertDialogCancel>
             <Button onClick={handleClose} disabled={closing}>
               {closing ? "Closing..." : "Close month"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ---------------- Edit trade code ---------------- */}
+      <Dialog open={editing !== null} onOpenChange={(o) => !editSaving && !o && setEditing(null)}>
+        <DialogContent className="flex max-h-[85vh] flex-col">
+          <DialogHeader>
+            <DialogTitle>Edit trade code {editing ? codeLabel(editing) : ""}</DialogTitle>
+            <DialogDescription>
+              The type and code number can&apos;t be changed because the summary column
+              {editing ? ` (${editing.column_name})` : ""} is built from them.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="overflow-y-auto">
+            <FieldGroup>
+              <Field>
+                <FieldLabel>Description</FieldLabel>
+                <Input value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />
+              </Field>
+              <Field>
+                <FieldLabel>
+                  Sort order
+                  <RequiredMark />
+                </FieldLabel>
+                <Input
+                  type="number"
+                  step={1}
+                  value={editSortOrder}
+                  onChange={(e) => setEditSortOrder(e.target.value)}
+                />
+              </Field>
+            </FieldGroup>
+            <p className="mt-1 text-xs text-neutral-500">
+              Lower numbers appear first among the summary columns.
+            </p>
+            {editError && <p className="mt-2 text-sm text-red-600">{editError}</p>}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditing(null)} disabled={editSaving}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEdit} disabled={!sortValid || editSaving}>
+              {editSaving ? "Saving..." : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---------------- Deactivate confirmation ---------------- */}
+      <AlertDialog open={deactivating !== null} onOpenChange={(o) => !toggleBusy && !o && setDeactivating(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Deactivate {deactivating ? codeLabel(deactivating) : "trade code"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              The code stays in the monthly summary and all past transactions are unchanged. You can
+              activate it again at any time.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={toggleBusy}>Cancel</AlertDialogCancel>
+            <Button onClick={() => deactivating && setActive(deactivating, false)} disabled={toggleBusy}>
+              {toggleBusy ? "Deactivating..." : "Deactivate"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
